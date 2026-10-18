@@ -12,6 +12,7 @@ import { BottomSheet } from '@/components/ui/BottomSheet';
 import { OptionButton, OptionState, optionLetter } from '@/components/test/OptionButton';
 import { QuestionNavigator, NavCellState } from '@/components/test/QuestionNavigator';
 import { ExplanationCard } from '@/components/test/ExplanationCard';
+import { QuestionLayout, QUESTION_PAGE_WIDTH } from '@/components/test/QuestionLayout';
 import type { MockExamResult, MockExamSession } from '@/types';
 
 type Phase = 'intro' | 'loading' | 'running' | 'submitting' | 'result';
@@ -198,7 +199,7 @@ export function MockExamScreen() {
   return (
     <div className="fixed inset-0 z-50 bg-[#F8FAFC] dark:bg-[#0B0F19] flex flex-col">
       <header className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 safe-top">
-        <div className="w-full max-w-2xl mx-auto px-4 pb-2">
+        <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 pb-2`}>
           <div className="flex items-center gap-3 h-12">
             <button
               type="button"
@@ -243,7 +244,7 @@ export function MockExamScreen() {
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
-        <div className="w-full max-w-2xl mx-auto px-4 py-4 flex flex-col gap-4">
+        <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 py-4 flex flex-col gap-4`}>
           {phase === 'submitting' ? (
             <div className="mt-16 flex flex-col items-center gap-3 text-slate-500">
               <LoaderCircle className="w-7 h-7 animate-spin text-[#2563EB]" />
@@ -254,39 +255,46 @@ export function MockExamScreen() {
               <>
                 {isResult && current === 0 && <ResultBanner result={result} onRetry={start} />}
 
-                <QuestionMediaViewer imageUrl={question.imageUrl} videoUrl={question.videoUrl} revealVideo={Boolean(isResult)} />
-                <h2 className="text-[17px] sm:text-lg font-bold leading-relaxed text-slate-900 dark:text-white whitespace-pre-line">
-                  {question.text}
-                </h2>
-                <div className="flex flex-col gap-2.5">
-                  {question.options.map((opt, idx) => (
-                    <OptionButton
-                      key={opt.id}
-                      index={idx}
-                      text={opt.text}
-                      state={optionState(opt.id)}
-                      disabled={phase !== 'running'}
-                      onClick={() => choose(opt.id)}
+                <QuestionLayout
+                  media={
+                    question.imageUrl || question.videoUrl ? (
+                      <QuestionMediaViewer imageUrl={question.imageUrl} videoUrl={question.videoUrl} revealVideo={Boolean(isResult)} />
+                    ) : null
+                  }
+                >
+                  <h2 className="text-[17px] sm:text-lg font-bold leading-relaxed text-slate-900 dark:text-white whitespace-pre-line">
+                    {question.text}
+                  </h2>
+                  <div className="flex flex-col gap-2.5">
+                    {question.options.map((opt, idx) => (
+                      <OptionButton
+                        key={opt.id}
+                        index={idx}
+                        text={opt.text}
+                        state={optionState(opt.id)}
+                        disabled={phase !== 'running'}
+                        onClick={() => choose(opt.id)}
+                      />
+                    ))}
+                  </div>
+
+                  {isResult && review && (
+                    <ExplanationCard
+                      isCorrect={review.isCorrect}
+                      correctLetter={(() => {
+                        const i = question.options.findIndex((o) => o.id === review.correctChoiceId);
+                        return i >= 0 ? optionLetter(i) : undefined;
+                      })()}
+                      correctText={question.options.find((o) => o.id === review.correctChoiceId)?.text}
+                      explanation={review.explanation}
+                      reference={review.reference}
                     />
-                  ))}
-                </div>
+                  )}
 
-                {isResult && review && (
-                  <ExplanationCard
-                    isCorrect={review.isCorrect}
-                    correctLetter={(() => {
-                      const i = question.options.findIndex((o) => o.id === review.correctChoiceId);
-                      return i >= 0 ? optionLetter(i) : undefined;
-                    })()}
-                    correctText={question.options.find((o) => o.id === review.correctChoiceId)?.text}
-                    explanation={review.explanation}
-                    reference={review.reference}
-                  />
-                )}
-
-                {error && phase === 'running' && (
-                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">{error}</p>
-                )}
+                  {error && phase === 'running' && (
+                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">{error}</p>
+                  )}
+                </QuestionLayout>
               </>
             )
           )}
@@ -295,7 +303,7 @@ export function MockExamScreen() {
 
       {phase !== 'submitting' && (
         <footer className="shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 safe-bottom">
-          <div className="w-full max-w-2xl mx-auto px-4 pt-3 flex items-center gap-3">
+          <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 pt-3 flex items-center gap-3`}>
             <button
               type="button"
               onClick={() => goTo(current - 1)}
@@ -309,7 +317,7 @@ export function MockExamScreen() {
               <button
                 type="button"
                 onClick={() => (answeredCount < total ? setConfirm('submit') : submit())}
-                className="flex-1 h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 md:flex-none md:w-80 md:ml-auto h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
               >
                 <FileCheck className="w-5 h-5" />
                 Imtihonni topshirish
@@ -318,7 +326,7 @@ export function MockExamScreen() {
               <button
                 type="button"
                 onClick={() => (current < total - 1 ? goTo(current + 1) : setActiveTab('home'))}
-                className="flex-1 h-14 rounded-2xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 md:flex-none md:w-80 md:ml-auto h-14 rounded-2xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
               >
                 {current < total - 1 ? 'Keyingi savol' : 'Bosh sahifaga'}
                 <ArrowRight className="w-5 h-5" />

@@ -12,6 +12,7 @@ import { BottomSheet } from '@/components/ui/BottomSheet';
 import { OptionButton, OptionState, optionLetter } from '@/components/test/OptionButton';
 import { QuestionNavigator, NavCellState } from '@/components/test/QuestionNavigator';
 import { ExplanationCard } from '@/components/test/ExplanationCard';
+import { QuestionLayout, QUESTION_PAGE_WIDTH } from '@/components/test/QuestionLayout';
 import { AIChatScreen } from '@/components/screens/AIChatScreen';
 import type { PracticeRequest, PracticeSession, Question, TutorContext } from '@/types';
 
@@ -276,7 +277,7 @@ export function PracticeScreen() {
     <div className="fixed inset-0 z-50 bg-[#F8FAFC] dark:bg-[#0B0F19] flex flex-col">
       {/* Header */}
       <header className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 safe-top">
-        <div className="w-full max-w-2xl mx-auto px-4 pb-2">
+        <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 pb-2`}>
           <div className="flex items-center gap-3 h-12">
             <button
               type="button"
@@ -323,7 +324,7 @@ export function PracticeScreen() {
 
       {/* Body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
-        <div className="w-full max-w-2xl mx-auto px-4 py-4 flex flex-col gap-4">
+        <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 py-4 flex flex-col gap-4`}>
           {loadError ? (
             <div className="mt-10 flex flex-col items-center text-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
@@ -379,48 +380,54 @@ export function PracticeScreen() {
             />
           ) : question ? (
             <>
-              <QuestionMediaViewer imageUrl={question.imageUrl} videoUrl={question.videoUrl} revealVideo={Boolean(answer)} />
+              <QuestionLayout
+                media={
+                  question.imageUrl || question.videoUrl ? (
+                    <QuestionMediaViewer imageUrl={question.imageUrl} videoUrl={question.videoUrl} revealVideo={Boolean(answer)} />
+                  ) : null
+                }
+              >
+                <h2 className="text-[17px] sm:text-lg font-bold leading-relaxed text-slate-900 dark:text-white whitespace-pre-line">
+                  {question.text}
+                </h2>
 
-              <h2 className="text-[17px] sm:text-lg font-bold leading-relaxed text-slate-900 dark:text-white whitespace-pre-line">
-                {question.text}
-              </h2>
+                <div className="flex flex-col gap-2.5">
+                  {question.options.map((opt, idx) => (
+                    <OptionButton
+                      key={opt.id}
+                      index={idx}
+                      text={opt.text}
+                      state={optionState(opt.id)}
+                      disabled={Boolean(answer)}
+                      onClick={() => select(opt.id)}
+                    />
+                  ))}
+                </div>
 
-              <div className="flex flex-col gap-2.5">
-                {question.options.map((opt, idx) => (
-                  <OptionButton
-                    key={opt.id}
-                    index={idx}
-                    text={opt.text}
-                    state={optionState(opt.id)}
-                    disabled={Boolean(answer)}
-                    onClick={() => select(opt.id)}
+                {answer && (
+                  <ExplanationCard
+                    isCorrect={answer.isCorrect}
+                    correctLetter={(() => {
+                      const i = question.options.findIndex((o) => o.id === answer.correctChoiceId);
+                      return i >= 0 ? optionLetter(i) : undefined;
+                    })()}
+                    correctText={question.options.find((o) => o.id === answer.correctChoiceId)?.text}
+                    explanation={answer.explanation}
+                    reference={answer.reference}
+                    onAskTutor={() => {
+                      cancelAutoNext();
+                      haptic('medium');
+                      setTutorContext({
+                        questionId: question.id,
+                        questionText: question.text,
+                        selectedChoiceId: answer.choiceId,
+                        selectedText: question.options.find((o) => o.id === answer.choiceId)?.text,
+                        correctText: question.options.find((o) => o.id === answer.correctChoiceId)?.text,
+                      });
+                    }}
                   />
-                ))}
-              </div>
-
-              {answer && (
-                <ExplanationCard
-                  isCorrect={answer.isCorrect}
-                  correctLetter={(() => {
-                    const i = question.options.findIndex((o) => o.id === answer.correctChoiceId);
-                    return i >= 0 ? optionLetter(i) : undefined;
-                  })()}
-                  correctText={question.options.find((o) => o.id === answer.correctChoiceId)?.text}
-                  explanation={answer.explanation}
-                  reference={answer.reference}
-                  onAskTutor={() => {
-                    cancelAutoNext();
-                    haptic('medium');
-                    setTutorContext({
-                      questionId: question.id,
-                      questionText: question.text,
-                      selectedChoiceId: answer.choiceId,
-                      selectedText: question.options.find((o) => o.id === answer.choiceId)?.text,
-                      correctText: question.options.find((o) => o.id === answer.correctChoiceId)?.text,
-                    });
-                  }}
-                />
-              )}
+                )}
+              </QuestionLayout>
             </>
           ) : null}
         </div>
@@ -429,7 +436,7 @@ export function PracticeScreen() {
       {/* Footer */}
       {session && !finished && (
         <footer className="shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 safe-bottom">
-          <div className="w-full max-w-2xl mx-auto px-4 pt-3 flex items-center gap-3">
+          <div className={`w-full ${QUESTION_PAGE_WIDTH} mx-auto px-4 pt-3 flex items-center gap-3`}>
             <button
               type="button"
               onClick={() => goTo(current - 1)}
@@ -442,7 +449,7 @@ export function PracticeScreen() {
             <button
               type="button"
               onClick={goNext}
-              className={`flex-1 h-14 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] ${
+              className={`flex-1 md:flex-none md:w-80 md:ml-auto h-14 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] ${
                 current === total - 1 && !reviewing ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'
               }`}
             >
@@ -521,7 +528,7 @@ function ResultsView({ total, answered, correct, questions, answers, onReview, o
   const skipped = total - answered;
 
   return (
-    <div className="flex flex-col gap-5 pb-6">
+    <div className="w-full max-w-2xl mx-auto flex flex-col gap-5 pb-6">
       <div className="flex flex-col items-center text-center gap-3 pt-4">
         <ProgressRing
           progress={percent}

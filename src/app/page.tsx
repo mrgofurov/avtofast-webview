@@ -20,7 +20,7 @@ export default function Page() {
     <DeviceWrapper>
       <Toast />
 
-      {activeTab !== 'ai' && <Header />}
+      <Header />
 
       <main className="flex-1 w-full">
         {activeTab === 'home' && <HomeScreen />}

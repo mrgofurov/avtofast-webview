@@ -103,7 +103,7 @@ export function QuestionMediaViewer({
             src={image}
             alt="Savol rasmi"
             onError={() => setImageFailed(true)}
-            className="w-full max-h-[42vh] object-contain"
+            className="w-full max-h-[42vh] md:max-h-[calc(100dvh-15rem)] object-contain"
           />
           <span className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-slate-900/60 text-white">
             <ZoomIn className="w-4 h-4" />

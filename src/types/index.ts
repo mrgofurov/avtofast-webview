@@ -122,9 +122,16 @@ export interface MockExamResult {
 // bank, chosen on the server from the sources the answer used — never text
 // the model wrote — so the clause shown is one the bank really cites.
 export interface TutorCitation {
-  questionId: string;
+  id: string;
+  // "rule": a clause of the Yo'l harakati qoidalari itself (lex.uz text).
+  // "question": a bank question's official explanation.
+  kind: 'rule' | 'question';
+  questionId?: string;
+  // Where the source sits: chapter or appendix and clause number for a rule.
   clause?: string;
   text: string;
+  // The rule's paragraph on lex.uz.
+  url?: string;
 }
 
 export interface TutorAnswer {

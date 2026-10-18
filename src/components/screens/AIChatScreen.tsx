@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, Bot, ChevronDown, CircleHelp, RotateCcw, ShieldCheck, Volume2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Bot, ChevronDown, CircleHelp, ExternalLink, RotateCcw, ShieldCheck, Volume2 } from 'lucide-react';
 import { useTelegram } from '@/context/TelegramContext';
+import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/services/api';
 import type { ChatMessage, TutorCitation, TutorContext, TutorTurn } from '@/types';
 
@@ -23,10 +24,10 @@ const CONTEXT_QUESTIONS = [
 ];
 
 const GREETING =
-  "Assalomu alaykum! Men Avtofast AI Ustoziman. Yo'l harakati qoidalari bo'yicha savol bering — faqat rasmiy savollar bazasi izohlariga tayanib javob beraman va qaysi bandga asoslanganimni ko'rsataman.";
+  "Assalomu alaykum! Men Avtofast AI Ustoziman. Yo'l harakati qoidalari bo'yicha savol bering — faqat Yo'l harakati qoidalarining rasmiy matni va imtihon savollarining rasmiy izohlariga tayanib javob beraman hamda qaysi bandga asoslanganimni ko'rsataman.";
 
 const CONTEXT_GREETING =
-  "Bu savolda xato qildingiz. Nimasi tushunarsiz bo'lsa, so'rang — savolning rasmiy izohiga tayanib tushuntiraman.";
+  "Bu savolda xato qildingiz. Nimasi tushunarsiz bo'lsa, so'rang — qoidalar matni va savolning rasmiy izohiga tayanib tushuntiraman.";
 
 // Earlier turns sent with each question, so a follow-up ("nega?") keeps its topic.
 const HISTORY_TURNS = 10;
@@ -45,23 +46,39 @@ function Citations({ citations }: { citations: TutorCitation[] }) {
     <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-700/60">
       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Manbalar</span>
       {citations.map((c) => {
-        const isOpen = open === c.questionId;
+        const isOpen = open === c.id;
         return (
-          <div key={c.questionId} className="rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-700">
+          <div key={c.id} className="rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-700">
             <button
               type="button"
-              onClick={() => setOpen(isOpen ? null : c.questionId)}
+              onClick={() => setOpen(isOpen ? null : c.id)}
               aria-expanded={isOpen}
               className="w-full flex items-center gap-1.5 px-2.5 py-2 text-left text-xs font-bold text-[#2563EB] dark:text-blue-400 cursor-pointer"
             >
               <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-              <span className="flex-1 min-w-0">{c.clause || 'Savollar bazasi izohi'}</span>
+              <span className="flex-1 min-w-0">
+                {c.clause || 'Savollar bazasi izohi'}
+                <span className="block text-[10px] font-semibold text-slate-400">
+                  {c.kind === 'rule' ? "Yo'l harakati qoidalari matni" : 'Imtihon savoli izohi'}
+                </span>
+              </span>
               <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>
             {isOpen && (
-              <p className="px-2.5 pb-2.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-line">
-                {c.text}
-              </p>
+              <div className="px-2.5 pb-2.5 flex flex-col gap-1.5">
+                <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-line">{c.text}</p>
+                {c.url && (
+                  <a
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="self-start inline-flex items-center gap-1 text-[11px] font-bold text-[#2563EB] dark:text-blue-400"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    lex.uz da ochish
+                  </a>
+                )}
+              </div>
             )}
           </div>
         );
@@ -79,6 +96,7 @@ interface AIChatScreenProps {
 
 export function AIChatScreen({ context, onClose }: AIChatScreenProps) {
   const { haptic, user } = useTelegram();
+  const { setActiveTab } = useApp();
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: 'greeting', sender: 'ai', text: context ? CONTEXT_GREETING : GREETING },
   ]);
@@ -168,7 +186,7 @@ export function AIChatScreen({ context, onClose }: AIChatScreenProps) {
       className={
         onClose
           ? 'w-full max-w-2xl mx-auto flex flex-col h-full'
-          : 'w-full max-w-4xl mx-auto flex flex-col h-[calc(100vh-70px)] pb-20 md:pb-6 px-3 sm:px-6'
+          : 'w-full max-w-4xl mx-auto flex flex-col h-[calc(100dvh-4rem)] sm:h-[calc(100dvh-4.5rem)] pt-3 pb-20 md:pb-6 px-3 sm:px-6'
       }
     >
       {/* Header bar */}
@@ -177,16 +195,14 @@ export function AIChatScreen({ context, onClose }: AIChatScreenProps) {
           onClose ? 'border-b safe-top' : 'rounded-2xl border mb-2'
         }`}
       >
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Testga qaytish"
-            className="w-9 h-9 -ml-1 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onClose ?? (() => setActiveTab('home'))}
+          aria-label={onClose ? 'Testga qaytish' : 'Bosh sahifaga qaytish'}
+          className="w-9 h-9 -ml-1 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
         <div className="w-9 h-9 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-[#2563EB] flex items-center justify-center">
           <Bot className="w-5 h-5" />
         </div>
