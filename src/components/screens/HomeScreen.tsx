@@ -5,6 +5,7 @@ import { ArrowRight, BookOpen, Bot, ChevronRight, FileCheck, Play, Shuffle, Targ
 import { useApp } from '@/context/AppContext';
 import { useTelegram } from '@/context/TelegramContext';
 import { categoryMeta } from '@/data/categories';
+import { ReadinessPlan } from '@/components/home/ReadinessPlan';
 import type { Dashboard, PracticeRequest, TopicSummary } from '@/types';
 
 interface NextStep {
@@ -163,6 +164,8 @@ export function HomeScreen() {
         </div>
       </div>
 
+      <ReadinessPlan dashboard={dashboard} topics={topics} />
+
       {/* Quick actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <QuickAction icon={BookOpen} tone="blue" title="Mavzular" hint={topics ? `${totalTests} ta test` : ''} onClick={() => setActiveTab('topics')} />
@@ -235,20 +238,18 @@ export function HomeScreen() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setActiveTab('ai')}
-        className="flex items-center gap-3 p-4 rounded-[24px] bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 text-left cursor-pointer"
-      >
-        <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+      <div className="flex items-center gap-3 p-4 rounded-[24px] bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/60">
+        <div className="w-10 h-10 rounded-xl bg-indigo-600/80 text-white flex items-center justify-center shrink-0">
           <Bot className="w-5 h-5" />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-bold text-slate-900 dark:text-white">AI Ustozga savol bering</div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">Belgilar, chorrahalar va qoidalar bo&apos;yicha</div>
+          <div className="text-sm font-bold text-slate-900 dark:text-white">AI Ustoz</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Qoidalar bo&apos;yicha savol-javob yordamchisi</div>
         </div>
-        <ChevronRight className="w-4 h-4 text-indigo-500" />
-      </button>
+        <span className="px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+          Tez kunda
+        </span>
+      </div>
     </div>
   );
 }

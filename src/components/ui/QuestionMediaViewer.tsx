@@ -29,20 +29,13 @@ export function QuestionMediaViewer({
   const [imageFailed, setImageFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // A new question, or the answer that unlocks its video, picks the tab again.
+  // A new question starts on its picture. Answering only unlocks the video
+  // tab: the learner decides whether and when to watch it.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setTab(revealVideo && video ? 'video' : image ? 'image' : 'video');
+    setTab(image ? 'image' : 'video');
     setImageFailed(false);
-  }, [image, video, revealVideo]);
-
-  useEffect(() => {
-    if (tab === 'video' && revealVideo && videoRef.current) {
-      videoRef.current.play().catch(() => {
-        // Autoplay refused: the native controls are there to start it.
-      });
-    }
-  }, [tab, revealVideo]);
+  }, [image, video]);
 
   if (!image && !video) return null;
 
@@ -73,7 +66,7 @@ export function QuestionMediaViewer({
             }`}
           >
             <Film className="w-3.5 h-3.5" />
-            Video
+            Video yechim
           </button>
         </div>
       )}

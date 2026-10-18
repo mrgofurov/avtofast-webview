@@ -11,7 +11,7 @@ import { QuestionMediaViewer } from '@/components/ui/QuestionMediaViewer';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { OptionButton, OptionState, optionLetter } from '@/components/test/OptionButton';
 import { QuestionNavigator, NavCellState } from '@/components/test/QuestionNavigator';
-import { ExplanationCard } from '@/components/test/ExplanationCard';
+import { AnswerFeedback } from '@/components/test/ExplanationCard';
 import { QuestionLayout, QUESTION_PAGE_WIDTH } from '@/components/test/QuestionLayout';
 import type { MockExamResult, MockExamSession } from '@/types';
 
@@ -35,6 +35,7 @@ export function MockExamScreen() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [confirm, setConfirm] = useState<'submit' | 'exit' | null>(null);
+  const [explainOpen, setExplainOpen] = useState(false);
 
   const shownAt = useRef(0);
   const pendingSaves = useRef<Promise<unknown>[]>([]);
@@ -106,6 +107,8 @@ export function MockExamScreen() {
 
   useEffect(() => {
     shownAt.current = Date.now();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExplainOpen(false);
   }, [current]);
 
   const questions = useMemo(() => exam?.questions ?? [], [exam]);
@@ -279,7 +282,7 @@ export function MockExamScreen() {
                   </div>
 
                   {isResult && review && (
-                    <ExplanationCard
+                    <AnswerFeedback
                       isCorrect={review.isCorrect}
                       correctLetter={(() => {
                         const i = question.options.findIndex((o) => o.id === review.correctChoiceId);
@@ -288,6 +291,9 @@ export function MockExamScreen() {
                       correctText={question.options.find((o) => o.id === review.correctChoiceId)?.text}
                       explanation={review.explanation}
                       reference={review.reference}
+                      open={explainOpen}
+                      onOpenChange={setExplainOpen}
+                      onNext={current < total - 1 ? () => goTo(current + 1) : undefined}
                     />
                   )}
 

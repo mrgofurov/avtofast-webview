@@ -8,7 +8,7 @@ import { BottomNavigation } from '@/components/common/BottomNavigation';
 import { Toast } from '@/components/common/Toast';
 import { HomeScreen } from '@/components/screens/HomeScreen';
 import { TopicsScreen } from '@/components/screens/TopicsScreen';
-import { AIChatScreen } from '@/components/screens/AIChatScreen';
+import { AIComingSoonScreen } from '@/components/screens/AIComingSoonScreen';
 import { MockExamScreen } from '@/components/screens/MockExamScreen';
 import { ProfileScreen } from '@/components/screens/ProfileScreen';
 import { PracticeScreen } from '@/components/screens/PracticeScreen';
@@ -25,7 +25,7 @@ export default function Page() {
       <main className="flex-1 w-full">
         {activeTab === 'home' && <HomeScreen />}
         {activeTab === 'topics' && <TopicsScreen />}
-        {activeTab === 'ai' && <AIChatScreen />}
+        {activeTab === 'ai' && <AIComingSoonScreen />}
         {activeTab === 'exam' && <MockExamScreen />}
         {activeTab === 'profile' && <ProfileScreen />}
       </main>

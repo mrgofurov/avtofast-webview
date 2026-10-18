@@ -56,7 +56,9 @@ export function BottomNavigation() {
                   }`}
                 />
                 {item.id === 'ai' && (
-                  <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="absolute -top-1.5 -right-4 px-1 rounded bg-amber-400 text-[8px] font-black leading-3 text-white">
+                    TEZ
+                  </span>
                 )}
               </div>
               <span className="text-[11px] tracking-tight mt-1 truncate max-w-[64px]">

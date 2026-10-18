@@ -11,15 +11,15 @@ import { ProgressRing } from '@/components/ui/ProgressRing';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { OptionButton, OptionState, optionLetter } from '@/components/test/OptionButton';
 import { QuestionNavigator, NavCellState } from '@/components/test/QuestionNavigator';
-import { ExplanationCard } from '@/components/test/ExplanationCard';
+import { AnswerFeedback } from '@/components/test/ExplanationCard';
 import { QuestionLayout, QUESTION_PAGE_WIDTH } from '@/components/test/QuestionLayout';
-import { AIChatScreen } from '@/components/screens/AIChatScreen';
-import type { PracticeRequest, PracticeSession, Question, TutorContext } from '@/types';
+import type { PracticeRequest, PracticeSession, Question } from '@/types';
 
 // The real theory exam is 20 questions with at most two mistakes allowed;
 // a practice score is judged against the same bar.
 const EXAM_PASS_RATIO = 18 / 20;
-const AUTO_NEXT_MS = 1200;
+// Long enough to see the green, short enough not to wait for it.
+const AUTO_NEXT_MS = 800;
 
 interface AnswerRecord {
   choiceId: string;
@@ -53,9 +53,7 @@ export function PracticeScreen() {
   const [finished, setFinished] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
-  // The tutor opens over the test rather than in its tab, so asking about a
-  // mistake does not throw away the session in progress.
-  const [tutorContext, setTutorContext] = useState<TutorContext | null>(null);
+  const [explainOpen, setExplainOpen] = useState(false);
 
   const shownAt = useRef(0);
   const completed = useRef(false);
@@ -108,10 +106,13 @@ export function PracticeScreen() {
     return cancelAutoNext;
   }, [practiceRequest, load]);
 
-  // Each question starts its own clock and at the top of the page.
+  // Each question starts its own clock, at the top of the page, with its
+  // explanation closed.
   useEffect(() => {
     shownAt.current = Date.now();
     scrollRef.current?.scrollTo({ top: 0 });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExplainOpen(false);
   }, [current, session]);
 
   const questions = useMemo(() => session?.questions ?? [], [session]);
@@ -139,6 +140,13 @@ export function PracticeScreen() {
     markCompleted();
     scrollRef.current?.scrollTo({ top: 0 });
   }, [markCompleted]);
+
+  // The auto-advance timer outlives the render that set it; it must call the
+  // finish of the moment it fires, which knows every answer given since.
+  const finishRef = useRef(finish);
+  useEffect(() => {
+    finishRef.current = finish;
+  }, [finish]);
 
   const close = useCallback(() => {
     cancelAutoNext();
@@ -211,27 +219,38 @@ export function PracticeScreen() {
           .catch((err) => console.warn('practice: answer not saved', err));
       }
 
-      // A right answer needs no reading: move on unless there is a video
-      // to watch. A wrong one stays put so the explanation gets read.
-      if (local.isCorrect && !question.videoUrl && current < total - 1) {
+      // A right answer needs no reading: move on by itself, to the next
+      // question still unanswered, or to the results when there is none.
+      if (local.isCorrect && !reviewing) {
+        const answered = new Set([...Object.keys(answers), question.id]);
+        const order = [...questions.keys()].slice(current + 1).concat([...questions.keys()].slice(0, current));
+        const next = order.find((i) => !answered.has(questions[i].id));
         autoNext.current = setTimeout(() => {
           autoNext.current = null;
-          setCurrent((i) => Math.min(i + 1, total - 1));
+          if (next === undefined) finishRef.current();
+          else setCurrent(next);
         }, AUTO_NEXT_MS);
       }
     },
-    [session, question, answers, finished, haptic, current, total],
+    [session, question, answers, finished, haptic, current, questions, reviewing],
   );
 
   // Keyboard: 1–9 or A–H to answer, arrows to move, Enter for next.
   useEffect(() => {
-    // While the tutor is open, typing a question must not answer this one.
-    if (!session || finished || tutorContext) return;
+    if (!session || finished) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const q = questions[current];
       if (!q) return;
       const key = e.key.toLowerCase();
+      if (key === 'i' && answers[q.id] && !answers[q.id].isCorrect) {
+        setExplainOpen((o) => !o);
+        return;
+      }
+      if (e.key === 'Escape' && explainOpen) {
+        setExplainOpen(false);
+        return;
+      }
       let idx = -1;
       if (/^[1-9]$/.test(key)) idx = Number(key) - 1;
       else if (/^[a-h]$/.test(key)) idx = key.charCodeAt(0) - 97;
@@ -247,7 +266,7 @@ export function PracticeScreen() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [session, finished, tutorContext, questions, current, select, goNext, goTo, close]);
+  }, [session, finished, questions, current, answers, explainOpen, select, goNext, goTo, close]);
 
   if (!practiceRequest) return null;
 
@@ -405,7 +424,7 @@ export function PracticeScreen() {
                 </div>
 
                 {answer && (
-                  <ExplanationCard
+                  <AnswerFeedback
                     isCorrect={answer.isCorrect}
                     correctLetter={(() => {
                       const i = question.options.findIndex((o) => o.id === answer.correctChoiceId);
@@ -414,17 +433,10 @@ export function PracticeScreen() {
                     correctText={question.options.find((o) => o.id === answer.correctChoiceId)?.text}
                     explanation={answer.explanation}
                     reference={answer.reference}
-                    onAskTutor={() => {
-                      cancelAutoNext();
-                      haptic('medium');
-                      setTutorContext({
-                        questionId: question.id,
-                        questionText: question.text,
-                        selectedChoiceId: answer.choiceId,
-                        selectedText: question.options.find((o) => o.id === answer.choiceId)?.text,
-                        correctText: question.options.find((o) => o.id === answer.correctChoiceId)?.text,
-                      });
-                    }}
+                    open={explainOpen}
+                    onOpenChange={setExplainOpen}
+                    onNext={goNext}
+                    nextLabel={current < total - 1 ? 'Keyingi savol' : reviewing ? 'Natijaga qaytish' : 'Testni yakunlash'}
                   />
                 )}
               </QuestionLayout>
@@ -497,11 +509,6 @@ export function PracticeScreen() {
         </div>
       </BottomSheet>
 
-      {tutorContext && (
-        <div className="fixed inset-0 z-[60] bg-[#F8FAFC] dark:bg-[#0B0F19] flex flex-col">
-          <AIChatScreen key={tutorContext.questionId} context={tutorContext} onClose={() => setTutorContext(null)} />
-        </div>
-      )}
     </div>
   );
 }

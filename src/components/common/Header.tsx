@@ -75,7 +75,9 @@ export function Header() {
                   <Icon className={`w-4 h-4 ${isActive ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
                   <span>{item.label}</span>
                   {item.id === 'ai' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse ml-0.5" />
+                    <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-[10px] font-bold">
+                      Tez kunda
+                    </span>
                   )}
                 </button>
               );
