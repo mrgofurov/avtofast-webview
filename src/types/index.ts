@@ -20,6 +20,9 @@ export interface Question {
   topicTitle: string;
   questionNumber?: number;
   totalQuestions?: number;
+  imageUrl?: string;
+  videoUrl?: string;
+  audioUrl?: string;
   signImage?: string;
   signType?: 'warning' | 'priority' | 'prohibitory' | 'mandatory' | 'information';
   signSymbol?: string;

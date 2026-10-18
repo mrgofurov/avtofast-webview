@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { TabType, Question, UserStats } from '@/types';
 import { INITIAL_USER_STATS, QUESTIONS_DATA } from '@/data/mockData';
+import { api } from '@/services/api';
 import { useTelegram } from './TelegramContext';
 
 interface AppContextType {
@@ -11,6 +12,7 @@ interface AppContextType {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   userStats: UserStats;
+  questionsPool: Question[];
   activeQuestion: Question | null;
   activeTopicId: string | null;
   isQuestionScreenOpen: boolean;
@@ -33,6 +35,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTabState] = useState<TabType>('home');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [userStats, setUserStats] = useState<UserStats>(INITIAL_USER_STATS);
+  const [questionsPool, setQuestionsPool] = useState<Question[]>(QUESTIONS_DATA);
   const [isQuestionScreenOpen, setIsQuestionScreenOpen] = useState(false);
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lastAnswer, setLastAnswer] = useState<{ questionId: string; selectedOptionId: string; isCorrect: boolean } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Load dark mode preference from localStorage
+  // Load preferences & load backend questions
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedTheme = localStorage.getItem('avtofast_theme');
@@ -60,6 +63,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
+
+    // Attempt to load live questions from backend
+    api.getQuestions().then((fetched) => {
+      if (fetched && fetched.length > 0) {
+        setQuestionsPool(fetched);
+      }
+    }).catch(() => {});
+
+    // Sync stats from backend dashboard
+    api.getUserStats().then((stats) => {
+      if (stats) {
+        setUserStats(stats);
+      }
+    }).catch(() => {});
   }, []);
 
   const toggleDarkMode = useCallback(() => {
@@ -102,12 +119,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       haptic('medium');
       setActiveTopicId(topicId || null);
 
-      let targetQ = QUESTIONS_DATA[0];
+      let targetQ = questionsPool[0];
       if (questionId) {
-        const found = QUESTIONS_DATA.find((q) => q.id === questionId);
+        const found = questionsPool.find((q) => q.id === questionId);
         if (found) targetQ = found;
       } else if (topicId) {
-        const found = QUESTIONS_DATA.find((q) => q.topicId === topicId);
+        const found = questionsPool.find((q) => q.topicId === topicId);
         if (found) targetQ = found;
       }
 
@@ -116,7 +133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsAnalyzing(false);
       setLastAnswer(null);
     },
-    [haptic]
+    [haptic, questionsPool]
   );
 
   const finishQuestionSession = useCallback(() => {
@@ -129,7 +146,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const submitAnswer = useCallback(
     (questionId: string, selectedOptionId: string) => {
-      const q = QUESTIONS_DATA.find((item) => item.id === questionId) || activeQuestion;
+      const q = questionsPool.find((item) => item.id === questionId) || activeQuestion;
       if (!q) return;
 
       const isCorrect = q.correctOptionId === selectedOptionId;
@@ -157,7 +174,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Open AI signature analysis automatically
       setIsAnalyzing(true);
     },
-    [activeQuestion, haptic]
+    [activeQuestion, haptic, questionsPool]
   );
 
   const openAIAnalysis = useCallback(() => {
@@ -177,13 +194,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Pick next question
     if (activeQuestion) {
-      const currentIndex = QUESTIONS_DATA.findIndex((q) => q.id === activeQuestion.id);
-      const nextIndex = (currentIndex + 1) % QUESTIONS_DATA.length;
-      setActiveQuestion(QUESTIONS_DATA[nextIndex]);
+      const currentIndex = questionsPool.findIndex((q) => q.id === activeQuestion.id);
+      const nextIndex = (currentIndex + 1) % questionsPool.length;
+      setActiveQuestion(questionsPool[nextIndex]);
     } else {
-      setActiveQuestion(QUESTIONS_DATA[0]);
+      setActiveQuestion(questionsPool[0]);
     }
-  }, [activeQuestion, haptic]);
+  }, [activeQuestion, haptic, questionsPool]);
 
   return (
     <AppContext.Provider
@@ -193,6 +210,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isDarkMode,
         toggleDarkMode,
         userStats,
+        questionsPool,
         activeQuestion,
         activeTopicId,
         isQuestionScreenOpen,

@@ -1,121 +1,97 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Sparkles } from 'lucide-react';
 import { useTelegram } from '@/context/TelegramContext';
 
 interface AudioPlayerProps {
+  audioUrl?: string;
   durationSeconds?: number;
   explanationText?: string;
+  title?: string;
 }
 
-export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlayerProps) {
+export function AudioPlayer({
+  audioUrl,
+  durationSeconds = 24,
+  explanationText,
+  title = "Ovozli Tushuntirish",
+}: AudioPlayerProps) {
   const { haptic } = useTelegram();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(durationSeconds);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
 
-  // 16 waveform bars with randomized heights
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Normalize audio URL from backend if provided
+  const resolveAudioUrl = (url?: string) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const base = process.env.NEXT_PUBLIC_API_URL?.replace('/v1', '') || 'http://localhost:8080';
+    return `${base}/uploads/${url.replace(/^\/?(uploads|medias)\//, '')}`;
+  };
+
+  const finalAudioUrl = resolveAudioUrl(audioUrl);
+
+  // 16 waveform bars with aesthetic heights
   const bars = [30, 60, 45, 80, 95, 70, 50, 85, 100, 65, 40, 90, 75, 55, 35, 60];
 
   const stopAudio = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.pause();
     }
-    if (oscillatorRef.current) {
-      try {
-        oscillatorRef.current.stop();
-        oscillatorRef.current.disconnect();
-      } catch (e) {
-        // ignore
-      }
-      oscillatorRef.current = null;
-    }
-    if (gainNodeRef.current) {
-      try {
-        gainNodeRef.current.disconnect();
-      } catch (e) {
-        // ignore
-      }
-      gainNodeRef.current = null;
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     setIsPlaying(false);
   };
 
   const togglePlay = () => {
     haptic('medium');
+
     if (isPlaying) {
       stopAudio();
     } else {
       setIsPlaying(true);
 
-      // Attempt SpeechSynthesis if available for real Uzbek voice reading
-      let usedSpeech = false;
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window && explanationText) {
-        try {
-          const utterance = new SpeechSynthesisUtterance(explanationText);
-          utterance.rate = playbackSpeed;
-          utterance.pitch = 1.0;
-          utterance.onend = () => {
-            stopAudio();
-            setCurrentTime(durationSeconds);
-          };
-          window.speechSynthesis.speak(utterance);
-          usedSpeech = true;
-        } catch (e) {
-          usedSpeech = false;
-        }
+      if (finalAudioUrl && audioRef.current) {
+        audioRef.current.playbackRate = playbackSpeed;
+        audioRef.current
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch(() => {
+            // Audio file fallback
+            runSimulationTimer();
+          });
+      } else {
+        runSimulationTimer();
       }
-
-      // If speech synthesis not triggered, use gentle Web Audio ambient tone generator
-      if (!usedSpeech && typeof window !== 'undefined') {
-        try {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          if (AudioContextClass) {
-            const ctx = new AudioContextClass();
-            audioContextRef.current = ctx;
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(260, ctx.currentTime);
-            gain.gain.setValueAtTime(0.04, ctx.currentTime);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            oscillatorRef.current = osc;
-            gainNodeRef.current = gain;
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      intervalRef.current = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= durationSeconds) {
-            stopAudio();
-            return 0;
-          }
-          return prev + 1;
-        });
-      }, 1000 / playbackSpeed);
     }
+  };
+
+  const runSimulationTimer = () => {
+    timerRef.current = setInterval(() => {
+      setCurrentTime((prev) => {
+        if (prev >= duration) {
+          stopAudio();
+          return 0;
+        }
+        return prev + 1;
+      });
+    }, 1000 / playbackSpeed);
   };
 
   const toggleSpeed = () => {
     haptic('light');
-    const nextSpeed = playbackSpeed === 1 ? 1.5 : playbackSpeed === 1.5 ? 2 : 1;
+    const nextSpeed = playbackSpeed === 1 ? 1.25 : playbackSpeed === 1.25 ? 1.5 : 1;
     setPlaybackSpeed(nextSpeed);
-    if (isPlaying) {
-      stopAudio();
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextSpeed;
     }
   };
 
@@ -123,6 +99,17 @@ export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlay
     haptic('light');
     stopAudio();
     setCurrentTime(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+    }
+  };
+
+  const toggleMute = () => {
+    haptic('light');
+    if (audioRef.current) {
+      audioRef.current.muted = !isMuted;
+    }
+    setIsMuted(!isMuted);
   };
 
   useEffect(() => {
@@ -131,7 +118,7 @@ export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlay
     };
   }, []);
 
-  const progressPercent = (currentTime / durationSeconds) * 100;
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -140,7 +127,28 @@ export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlay
   };
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-3.5 border border-slate-200/80 dark:border-slate-700/80">
+    <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-3.5 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
+      {finalAudioUrl && (
+        <audio
+          ref={audioRef}
+          src={finalAudioUrl}
+          onTimeUpdate={() => {
+            if (audioRef.current) {
+              setCurrentTime(Math.floor(audioRef.current.currentTime));
+            }
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current && audioRef.current.duration) {
+              setDuration(Math.floor(audioRef.current.duration));
+            }
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+        />
+      )}
+
       <div className="flex items-center justify-between gap-3">
         {/* Play/Pause Button */}
         <button
@@ -154,12 +162,12 @@ export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlay
         {/* Waveform Visualization */}
         <div className="flex-1 flex flex-col gap-1.5 min-w-0">
           <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-1 text-[#2563EB] dark:text-blue-400">
-              <Volume2 className="w-3 h-3" />
-              <span>AI Ovozli Tushuntirish</span>
+            <span className="flex items-center gap-1 text-[#2563EB] dark:text-blue-400 font-bold truncate">
+              <Volume2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{title}</span>
             </span>
-            <span>
-              {formatTime(currentTime)} / {formatTime(durationSeconds)}
+            <span className="shrink-0 font-mono">
+              {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
 
@@ -191,18 +199,20 @@ export function AudioPlayer({ durationSeconds = 28, explanationText }: AudioPlay
           </div>
         </div>
 
-        {/* Speed & Reset Controls */}
+        {/* Speed & Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={toggleSpeed}
-            className="h-8 px-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform"
+            className="h-8 px-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform cursor-pointer"
+            title="Ijro tezligi"
           >
             {playbackSpeed}x
           </button>
           <button
             onClick={resetAudio}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 active:scale-95 transition-transform"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 active:scale-95 transition-transform cursor-pointer"
             aria-label="Qayta boshlash"
+            title="Boshiga qaytarish"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
