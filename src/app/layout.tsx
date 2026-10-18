@@ -44,7 +44,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="uz" className={`${inter.variable} h-full antialiased suppressHydrationWarning`}>
+    // Telegram's script writes viewport CSS variables onto <html> before
+    // React hydrates; that difference is expected, not a bug.
+    <html lang="uz" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <Script
           src="https://telegram.org/js/telegram-web-app.js"

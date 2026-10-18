@@ -1,8 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { TabType, Question, UserStats } from '@/types';
-import { INITIAL_USER_STATS, QUESTIONS_DATA } from '@/data/mockData';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import type { Dashboard, PracticeRequest, TabType, TopicSummary } from '@/types';
 import { api } from '@/services/api';
 import { useTelegram } from './TelegramContext';
 
@@ -11,21 +10,21 @@ interface AppContextType {
   setActiveTab: (tab: TabType) => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
-  userStats: UserStats;
-  questionsPool: Question[];
-  activeQuestion: Question | null;
-  activeTopicId: string | null;
-  isQuestionScreenOpen: boolean;
-  isAnalyzing: boolean;
-  lastAnswer: { questionId: string; selectedOptionId: string; isCorrect: boolean } | null;
+
+  // Server state. Null until the first load finishes; screens show a skeleton
+  // for null rather than a made-up number.
+  dashboard: Dashboard | null;
+  topics: TopicSummary[] | null;
+  loadError: string | null;
+  refresh: () => Promise<void>;
+
+  // The practice screen is a full-screen overlay over whichever tab opened it.
+  practiceRequest: PracticeRequest | null;
+  startPractice: (request: PracticeRequest) => void;
+  closePractice: () => void;
+
   toastMessage: string | null;
   showToast: (msg: string) => void;
-  startQuestionSession: (questionId?: string, topicId?: string) => void;
-  finishQuestionSession: () => void;
-  submitAnswer: (questionId: string, selectedOptionId: string) => void;
-  openAIAnalysis: () => void;
-  closeAIAnalysis: () => void;
-  nextQuestion: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -33,174 +32,83 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const { haptic } = useTelegram();
   const [activeTab, setActiveTabState] = useState<TabType>('home');
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
-  const [userStats, setUserStats] = useState<UserStats>(INITIAL_USER_STATS);
-  const [questionsPool, setQuestionsPool] = useState<Question[]>(QUESTIONS_DATA);
-  const [isQuestionScreenOpen, setIsQuestionScreenOpen] = useState(false);
-  const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
-  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [lastAnswer, setLastAnswer] = useState<{ questionId: string; selectedOptionId: string; isCorrect: boolean } | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [topics, setTopics] = useState<TopicSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [practiceRequest, setPracticeRequest] = useState<PracticeRequest | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load preferences & load backend questions
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('avtofast_theme');
-      if (savedTheme === 'dark') {
-        setIsDarkMode(true);
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-
-      const savedStats = localStorage.getItem('avtofast_stats');
-      if (savedStats) {
-        try {
-          setUserStats(JSON.parse(savedStats));
-        } catch (e) {
-          // ignore
-        }
-      }
+  const refresh = useCallback(async () => {
+    try {
+      const [d, t] = await Promise.all([api.getDashboard(), api.getTopics()]);
+      setDashboard(d);
+      setTopics(t);
+      setLoadError(null);
+    } catch (err) {
+      console.warn('API: initial load failed', err);
+      setLoadError("Serverga ulanib bo'lmadi. Internetni tekshirib, qayta urinib ko'ring.");
     }
-
-    // Attempt to load live questions from backend
-    api.getQuestions().then((fetched) => {
-      if (fetched && fetched.length > 0) {
-        setQuestionsPool(fetched);
-      }
-    }).catch(() => {});
-
-    // Sync stats from backend dashboard
-    api.getUserStats().then((stats) => {
-      if (stats) {
-        setUserStats(stats);
-      }
-    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try {
+      const dark = localStorage.getItem('avtofast_theme') === 'dark';
+      // Read after mount, not during render: the server has no storage, and a
+      // first render that differed between the two would fail hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsDarkMode(dark);
+      document.documentElement.classList.toggle('dark', dark);
+    } catch {
+      // storage unavailable: stay on the light theme
+    }
+    refresh();
+  }, [refresh]);
 
   const toggleDarkMode = useCallback(() => {
     setIsDarkMode((prev) => {
       const next = !prev;
-      if (typeof window !== 'undefined') {
+      try {
         localStorage.setItem('avtofast_theme', next ? 'dark' : 'light');
-        if (next) {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
+      } catch {
+        // ignore
       }
-      haptic('light');
+      document.documentElement.classList.toggle('dark', next);
       return next;
     });
+    haptic('light');
   }, [haptic]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage((curr) => (curr === msg ? null : curr));
-    }, 3000);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
   const setActiveTab = useCallback(
     (tab: TabType) => {
       haptic('selection');
       setActiveTabState(tab);
-      // Close question modal if switching tabs
-      if (isQuestionScreenOpen) {
-        setIsQuestionScreenOpen(false);
-      }
+      setPracticeRequest(null);
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
     },
-    [haptic, isQuestionScreenOpen]
+    [haptic],
   );
 
-  const startQuestionSession = useCallback(
-    (questionId?: string, topicId?: string) => {
+  const startPractice = useCallback(
+    (request: PracticeRequest) => {
       haptic('medium');
-      setActiveTopicId(topicId || null);
-
-      let targetQ = questionsPool[0];
-      if (questionId) {
-        const found = questionsPool.find((q) => q.id === questionId);
-        if (found) targetQ = found;
-      } else if (topicId) {
-        const found = questionsPool.find((q) => q.topicId === topicId);
-        if (found) targetQ = found;
-      }
-
-      setActiveQuestion(targetQ);
-      setIsQuestionScreenOpen(true);
-      setIsAnalyzing(false);
-      setLastAnswer(null);
+      setPracticeRequest(request);
     },
-    [haptic, questionsPool]
+    [haptic],
   );
 
-  const finishQuestionSession = useCallback(() => {
-    haptic('light');
-    setIsQuestionScreenOpen(false);
-    setActiveQuestion(null);
-    setIsAnalyzing(false);
-    setLastAnswer(null);
-  }, [haptic]);
-
-  const submitAnswer = useCallback(
-    (questionId: string, selectedOptionId: string) => {
-      const q = questionsPool.find((item) => item.id === questionId) || activeQuestion;
-      if (!q) return;
-
-      const isCorrect = q.correctOptionId === selectedOptionId;
-      haptic(isCorrect ? 'success' : 'error');
-
-      setLastAnswer({
-        questionId,
-        selectedOptionId,
-        isCorrect,
-      });
-
-      // Update user stats
-      setUserStats((prev) => {
-        const updated = {
-          ...prev,
-          questionsSolved: prev.questionsSolved + 1,
-          accuracyRate: Math.min(100, Math.round(((prev.questionsSolved * (prev.accuracyRate / 100) + (isCorrect ? 1 : 0)) / (prev.questionsSolved + 1)) * 100)),
-        };
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('avtofast_stats', JSON.stringify(updated));
-        }
-        return updated;
-      });
-
-      // Open AI signature analysis automatically
-      setIsAnalyzing(true);
-    },
-    [activeQuestion, haptic, questionsPool]
-  );
-
-  const openAIAnalysis = useCallback(() => {
-    haptic('light');
-    setIsAnalyzing(true);
-  }, [haptic]);
-
-  const closeAIAnalysis = useCallback(() => {
-    haptic('light');
-    setIsAnalyzing(false);
-  }, [haptic]);
-
-  const nextQuestion = useCallback(() => {
-    haptic('medium');
-    setIsAnalyzing(false);
-    setLastAnswer(null);
-
-    // Pick next question
-    if (activeQuestion) {
-      const currentIndex = questionsPool.findIndex((q) => q.id === activeQuestion.id);
-      const nextIndex = (currentIndex + 1) % questionsPool.length;
-      setActiveQuestion(questionsPool[nextIndex]);
-    } else {
-      setActiveQuestion(questionsPool[0]);
-    }
-  }, [activeQuestion, haptic, questionsPool]);
+  const closePractice = useCallback(() => {
+    setPracticeRequest(null);
+    // Scores and coverage changed: the topic list and home stats should show it.
+    refresh();
+  }, [refresh]);
 
   return (
     <AppContext.Provider
@@ -209,21 +117,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setActiveTab,
         isDarkMode,
         toggleDarkMode,
-        userStats,
-        questionsPool,
-        activeQuestion,
-        activeTopicId,
-        isQuestionScreenOpen,
-        isAnalyzing,
-        lastAnswer,
+        dashboard,
+        topics,
+        loadError,
+        refresh,
+        practiceRequest,
+        startPractice,
+        closePractice,
         toastMessage,
         showToast,
-        startQuestionSession,
-        finishQuestionSession,
-        submitAnswer,
-        openAIAnalysis,
-        closeAIAnalysis,
-        nextQuestion,
       }}
     >
       {children}

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { api } from '@/services/api';
 
 export interface TelegramUser {
   id?: number;
@@ -24,10 +23,8 @@ interface TelegramContextType {
   setIsDesktopView: (val: boolean) => void;
 }
 
-const defaultUser: TelegramUser = {
-  first_name: 'Murod',
-  username: 'murod_avto',
-};
+// Outside Telegram there is no name to greet the learner by.
+const defaultUser: TelegramUser = {};
 
 const TelegramContext = createContext<TelegramContextType>({
   isTelegram: false,
@@ -58,20 +55,11 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
         // ignore
       }
 
+      // Sign-in happens in the API service on the first request, so it can
+      // share one session between every screen that loads at startup.
       if (tg.initDataUnsafe?.user) {
         setUser(tg.initDataUnsafe.user);
-        api.authenticateTelegram({
-          initData: tg.initData,
-          telegramId: tg.initDataUnsafe.user.id,
-          firstName: tg.initDataUnsafe.user.first_name,
-          lastName: tg.initDataUnsafe.user.last_name,
-          username: tg.initDataUnsafe.user.username,
-          photoUrl: tg.initDataUnsafe.user.photo_url,
-        });
       }
-    } else {
-      // Browser guest session
-      api.authenticateGuest();
     }
   }, []);
 

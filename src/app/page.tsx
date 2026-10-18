@@ -11,22 +11,17 @@ import { TopicsScreen } from '@/components/screens/TopicsScreen';
 import { AIChatScreen } from '@/components/screens/AIChatScreen';
 import { MockExamScreen } from '@/components/screens/MockExamScreen';
 import { ProfileScreen } from '@/components/screens/ProfileScreen';
-import { QuestionScreen } from '@/components/screens/QuestionScreen';
-import { AIAnalysisModal } from '@/components/screens/AIAnalysisModal';
+import { PracticeScreen } from '@/components/screens/PracticeScreen';
 
 export default function Page() {
-  const { activeTab, isQuestionScreenOpen, isAnalyzing } = useApp();
+  const { activeTab, practiceRequest } = useApp();
 
   return (
     <DeviceWrapper>
       <Toast />
 
-      {/* Persistent Header for relevant screens */}
-      {activeTab !== 'exam' && activeTab !== 'ai' && (
-        <Header showGreeting={activeTab === 'home'} />
-      )}
+      {activeTab !== 'ai' && <Header />}
 
-      {/* Screen Views */}
       <main className="flex-1 w-full">
         {activeTab === 'home' && <HomeScreen />}
         {activeTab === 'topics' && <TopicsScreen />}
@@ -35,14 +30,11 @@ export default function Page() {
         {activeTab === 'profile' && <ProfileScreen />}
       </main>
 
-      {/* Active Interactive Question Modal */}
-      {isQuestionScreenOpen && <QuestionScreen />}
+      {/* Practice runs full-screen over whichever tab started it, so closing
+          it returns the learner exactly where they were. */}
+      {practiceRequest && <PracticeScreen />}
 
-      {/* Signature AI Analysis Modal */}
-      {isAnalyzing && <AIAnalysisModal />}
-
-      {/* Fixed Bottom Navigation (Max 5 Tabs) */}
-      {!isQuestionScreenOpen && activeTab !== 'exam' && <BottomNavigation />}
+      {!practiceRequest && <BottomNavigation />}
     </DeviceWrapper>
   );
 }

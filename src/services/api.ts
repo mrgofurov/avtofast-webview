@@ -1,302 +1,318 @@
-import { Question, Topic, UserStats } from '@/types';
-import { QUESTIONS_DATA, TOPICS_DATA, INITIAL_USER_STATS } from '@/data/mockData';
+import type {
+  Dashboard,
+  MockExamResult,
+  MockExamSession,
+  PracticeAnswerResult,
+  PracticeRequest,
+  PracticeSession,
+  Question,
+  TopicSummary,
+  TopicTest,
+  TutorAnswer,
+  TutorTurn,
+} from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/v1';
+const PACK_ID = 'uz-theory-2026-09';
+const LOCALE = 'uz-Latn-UZ';
 
-export interface AuthSession {
-  token: string;
-  user: {
-    id: string;
-    displayName: string;
-    avatarUrl: string | null;
-    role: string;
-  };
+const TOKEN_KEY = 'avtofast_jwt_token';
+// Whose token is stored: "tg:<id>" or "guest". A guest token left over from a
+// browser visit must not be reused once the same device opens the app inside
+// Telegram, or the learner's progress lands on an anonymous account.
+const OWNER_KEY = 'avtofast_jwt_owner';
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
 }
 
-export interface BackendQuestionItem {
+interface BackendQuestion {
   id: string;
-  packId: string;
-  contentVersion: string;
   category: string;
-  difficulty: string;
-  image?: {
-    url: string;
-    sha256?: string;
-    alt?: Record<string, string>;
-  };
+  image?: { url: string };
   videoUrl?: string;
   audioUrl?: string;
-  source?: {
-    reference: string;
-    effectiveFrom?: string;
-    officialSourceUrl?: string;
-  };
+  source?: { reference?: string };
   prompt: string;
-  choices: Array<{
-    id: string;
-    text: string;
-    position: number;
-  }>;
+  choices: Array<{ id: string; text: string; position: number }>;
   correctChoiceId?: string;
   explanation?: string;
 }
 
+interface TelegramWebAppUser {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+}
+
+// The imported bank labels every question "YHQ" (some "YHQ (Prepdrive)"),
+// which says nothing the explanation does not already cite — the explanation
+// itself names the exact clause. Only a specific reference is worth showing.
+function specificReference(reference?: string): string | undefined {
+  if (!reference || /^YHQ(\s*\(.*\))?$/i.test(reference.trim())) return undefined;
+  return reference.trim();
+}
+
+function toQuestion(item: BackendQuestion): Question {
+  return {
+    id: item.id,
+    category: item.category,
+    imageUrl: item.image?.url || undefined,
+    videoUrl: item.videoUrl || undefined,
+    audioUrl: item.audioUrl || undefined,
+    text: item.prompt,
+    options: [...item.choices]
+      .sort((a, b) => a.position - b.position)
+      .map((c) => ({ id: c.id, text: c.text })),
+    correctOptionId: item.correctChoiceId || undefined,
+    explanation: item.explanation?.trim() || undefined,
+    reference: specificReference(item.source?.reference),
+  };
+}
+
+// Media paths come back relative to the API origin ("/medias/questions/x.webp").
+export function resolveMediaUrl(path?: string): string {
+  if (!path) return '';
+  if (/^https?:\/\//.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/v1\/?$/, '');
+  return `${origin}/${path.replace(/^\/+/, '')}`;
+}
+
+function telegramUser(): { initData: string; user: TelegramWebAppUser } | null {
+  if (typeof window === 'undefined') return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tg = (window as any).Telegram?.WebApp;
+  if (!tg?.initDataUnsafe?.user?.id) return null;
+  return { initData: tg.initData, user: tg.initDataUnsafe.user };
+}
+
+function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 class ApiService {
   private token: string | null = null;
-  private packId = 'uz-theory-2026-09';
+  // One sign-in at a time: every screen asks for data on mount, and without
+  // this each of them would create its own guest account.
+  private signingIn: Promise<string> | null = null;
 
-  constructor() {
-    if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('avtofast_jwt_token');
+  private readStoredToken(owner: string): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      if (localStorage.getItem(OWNER_KEY) !== owner) return null;
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
     }
   }
 
-  setToken(token: string) {
+  private storeToken(token: string, owner: string) {
     this.token = token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('avtofast_jwt_token', token);
-    }
-  }
-
-  getToken(): string | null {
-    if (!this.token && typeof window !== 'undefined') {
-      this.token = localStorage.getItem('avtofast_jwt_token');
-    }
-    return this.token;
-  }
-
-  private getHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    const t = this.getToken();
-    if (t) {
-      headers['Authorization'] = `Bearer ${t}`;
-    }
-    return headers;
-  }
-
-  // Ensure user is authenticated (Guest or Telegram)
-  async ensureAuthenticated(): Promise<string | null> {
-    let t = this.getToken();
-    if (t) return t;
-
-    const guestSession = await this.authenticateGuest('YHQ O\'quvchi');
-    if (guestSession?.token) {
-      return guestSession.token;
-    }
-    return null;
-  }
-
-  // Telegram Mini App authentication
-  async authenticateTelegram(params: {
-    initData?: string;
-    telegramId?: number;
-    firstName?: string;
-    lastName?: string;
-    username?: string;
-    photoUrl?: string;
-  }): Promise<AuthSession | null> {
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/telegram`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
-
-      if (!res.ok) return null;
-      const data: AuthSession = await res.json();
-      if (data.token) {
-        this.setToken(data.token);
-      }
-      return data;
-    } catch (err) {
-      console.warn('API: Telegram auth fallback', err);
-      return null;
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(OWNER_KEY, owner);
+    } catch {
+      // Private mode: the token still lives for this page load.
     }
   }
 
-  // Browser Guest authentication
-  async authenticateGuest(displayName?: string): Promise<AuthSession | null> {
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: displayName || 'Haydovchilik o\'rganuvchisi' }),
-      });
+  private async signIn(): Promise<string> {
+    const tg = telegramUser();
+    const owner = tg ? `tg:${tg.user.id}` : 'guest';
 
-      if (!res.ok) return null;
-      const data: AuthSession = await res.json();
-      if (data.token) {
-        this.setToken(data.token);
-      }
-      return data;
-    } catch (err) {
-      console.warn('API: Guest auth connection refused, using local mode', err);
-      return null;
+    const stored = this.readStoredToken(owner);
+    if (stored) {
+      this.token = stored;
+      return stored;
     }
-  }
 
-  // Fetch Questions from Backend (with automatic conversion to Question interface)
-  async getQuestions(category?: string, limit: number = 50): Promise<Question[]> {
-    try {
-      await this.ensureAuthenticated();
-      const token = this.getToken();
-      if (!token) throw new Error('No auth token');
-
-      const url = new URL(`${API_BASE_URL}/content/packs/${this.packId}/questions`);
-      url.searchParams.set('limit', limit.toString());
-      if (category) {
-        url.searchParams.set('category', category);
-      }
-
-      const res = await fetch(url.toString(), {
-        headers: this.getHeaders(),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        return data.items.map((item: BackendQuestionItem, idx: number) => {
-          // Resolve category title
-          const catTitleMap: Record<string, string> = {
-            road_signs: "Yo'l belgilari",
-            intersections: "Chorrahalar",
-            traffic_rules: "Harakat qoidalari",
-            first_aid: "Birinchi tibbiy yordam",
-            penalties: "Jarimalar va javobgarlik",
-            vehicle_safety: "Texnik holat va xavfsizlik",
-            situations: "Harakatlanish holatlari",
-          };
-
-          return {
-            id: item.id,
-            topicId: item.category || 'road_signs',
-            topicTitle: catTitleMap[item.category] || "Yo'l harakati qoidalari",
-            questionNumber: idx + 1,
-            totalQuestions: data.items.length,
-            imageUrl: item.image?.url || undefined,
-            videoUrl: item.videoUrl || undefined,
-            audioUrl: item.audioUrl || undefined,
-            text: item.prompt,
-            options: item.choices.map((c) => ({
-              id: c.id,
-              text: c.text,
-            })),
-            correctOptionId: item.correctChoiceId || 'a',
-            explanation: {
-              whyWrong: "Diqqat qiling: Yo'l harakati qoidalari talablariga asosan ushbu vaziyatda qat'iy ustuvorlik tartibiga amal qilinishi shart.",
-              officialRule: item.explanation || (item.source?.reference
-                ? `${item.source.reference} qoidalariga asosan transport vositalari xavfsiz harakatlanishi shart.`
-                : "Yo'l harakati qoidalariga asosan haydovchi o'zaro ustuvorlik belgilariga amal qilishi shart."),
-              ruleArticle: item.source?.reference || "YHQ",
-              memoryTrick: "Harakatlanayotganda avval tartibga soluvchi, so'ng svetofor, so'ngra belgilar va o'ng qo'l qoidasiga e'tibor bering!",
-              realLifeScenario: "O'zbekiston yo'llarida va chorrahalarida qat'iy yo'l harakati qoidalari amal qiladi.",
-            },
-          };
+    const res = tg
+      ? await fetch(`${API_BASE_URL}/auth/telegram`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            initData: tg.initData,
+            telegramId: tg.user.id,
+            firstName: tg.user.first_name,
+            lastName: tg.user.last_name,
+            username: tg.user.username,
+            photoUrl: tg.user.photo_url,
+          }),
+        })
+      : await fetch(`${API_BASE_URL}/auth/guest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName: "Avtofast o'quvchisi" }),
         });
+
+    if (!res.ok) throw new ApiError(res.status, 'Tizimga kirib bo\'lmadi');
+    const data: { token?: string } = await res.json();
+    if (!data.token) throw new ApiError(500, 'Token qaytmadi');
+    this.storeToken(data.token, owner);
+    return data.token;
+  }
+
+  private async ensureToken(): Promise<string> {
+    if (this.token) return this.token;
+    if (!this.signingIn) {
+      this.signingIn = this.signIn().finally(() => {
+        this.signingIn = null;
+      });
+    }
+    return this.signingIn;
+  }
+
+  private async request<T>(
+    path: string,
+    init: { method?: string; body?: unknown; idempotent?: boolean } = {},
+    retried = false,
+  ): Promise<T> {
+    const token = await this.ensureToken();
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+    if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (init.idempotent) headers['Idempotency-Key'] = newIdempotencyKey();
+
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: init.method ?? 'GET',
+      headers,
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+
+    // An expired or revoked token: sign in again once, then give up.
+    if (res.status === 401 && !retried) {
+      this.token = null;
+      try {
+        localStorage.removeItem(TOKEN_KEY);
+      } catch {
+        // ignore
       }
-    } catch (err) {
-      console.warn('API: Failed to fetch backend questions, falling back to bundled dataset', err);
+      return this.request<T>(path, init, true);
     }
 
-    // Fallback to local high quality questions
-    return QUESTIONS_DATA;
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const err = await res.json();
+        message = err?.error?.message || err?.message || message;
+      } catch {
+        // non-JSON error body
+      }
+      throw new ApiError(res.status, message);
+    }
+
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  // Create timed Mock Exam on backend
-  async createMockExam(): Promise<{ id: string; questions: Question[]; durationSeconds: number } | null> {
-    try {
-      await this.ensureAuthenticated();
-      const res = await fetch(`${API_BASE_URL}/mock-exams`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          packId: this.packId,
-          locale: 'uz-Latn-UZ',
-          format: 'official_20',
-        }),
-      });
-
-      if (!res.ok) return null;
-      const data = await res.json();
-
-      const questions: Question[] = (data.questions || []).map((item: BackendQuestionItem, idx: number) => ({
-        id: item.id,
-        topicId: item.category || 'road_signs',
-        topicTitle: "Rasmiy Imtihon",
-        questionNumber: idx + 1,
-        totalQuestions: 20,
-        imageUrl: item.image?.url,
-        videoUrl: item.videoUrl,
-        audioUrl: item.audioUrl,
-        text: item.prompt,
-        options: item.choices.map((c) => ({ id: c.id, text: c.text })),
-        correctOptionId: 'a',
-        explanation: {
-          whyWrong: "Imtihon savolida qoidaning nozik jihatiga e'tibor bering.",
-          officialRule: item.source?.reference || "YHQ Rasmiy Imtihon standarti",
-          ruleArticle: item.source?.reference || "YHQ",
-          memoryTrick: "Chorrahalar va belgilarda o'ngdan kelayotgan xavfni doimo inobatga oling.",
-          realLifeScenario: "DYHXX rasmiy nazariy imtihonida xuddi shu formatda savol tushadi.",
-        },
-      }));
-
-      return {
-        id: data.id,
-        questions,
-        durationSeconds: 1200,
-      };
-    } catch (err) {
-      console.warn('API: createMockExam fallback to local', err);
-      return null;
-    }
+  async getDashboard(): Promise<Dashboard> {
+    const d = await this.request<Dashboard>('/dashboard');
+    return { ...d, weakCategories: d.weakCategories ?? [] };
   }
 
-  // Submit Answer to Practice Session
-  async submitPracticeAnswer(sessionId: string, questionId: string, choiceId: string): Promise<any | null> {
-    try {
-      await this.ensureAuthenticated();
-      const res = await fetch(`${API_BASE_URL}/practice-sessions/${sessionId}/answers`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          questionId,
-          selectedChoiceId: choiceId,
-          elapsedMs: 2000,
-        }),
-      });
-
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (err) {
-      return null;
-    }
+  async getTopics(): Promise<TopicSummary[]> {
+    const res = await this.request<{ items: TopicSummary[] }>(`/topics?packId=${PACK_ID}`);
+    return res.items ?? [];
   }
 
-  // Get user profile / stats
-  async getUserStats(): Promise<UserStats | null> {
-    try {
-      await this.ensureAuthenticated();
-      const res = await fetch(`${API_BASE_URL}/dashboard`, {
-        headers: this.getHeaders(),
-      });
+  async getTopicTests(category: string): Promise<TopicTest[]> {
+    const res = await this.request<{ items: TopicTest[] }>(
+      `/topics/${encodeURIComponent(category)}/tests?packId=${PACK_ID}`,
+    );
+    return res.items ?? [];
+  }
 
-      if (!res.ok) return null;
-      const data = await res.json();
-      return {
-        readinessScore: data.readinessScore || 85,
-        questionsSolved: data.stats?.totalAnswered || 114,
-        accuracyRate: data.stats?.accuracyPercent || 88,
-        currentStreakDays: data.stats?.streakDays || 5,
-        weakTopics: data.weakCategories?.length ? data.weakCategories : ["Chorrahalarda o'tish", "Svetofor signallari"],
-        lastStudyDate: "Bugun",
-      };
-    } catch (err) {
-      return null;
+  async startPractice(request: Exclude<PracticeRequest, { kind: 'retry' }>): Promise<PracticeSession> {
+    const body: Record<string, unknown> = { packId: PACK_ID, locale: LOCALE, questionCount: 20 };
+    if (request.kind === 'topic_test') {
+      body.mode = 'category';
+      body.category = request.category;
+      body.testIndex = request.testIndex;
+    } else if (request.kind === 'mistakes') {
+      body.mode = 'mistake_review';
+      if (request.category) body.category = request.category;
+    } else {
+      body.mode = 'adaptive';
+      if (request.category) body.category = request.category;
     }
+
+    const res = await this.request<{ id: string; questions: BackendQuestion[] }>('/practice-sessions', {
+      method: 'POST',
+      body,
+      idempotent: true,
+    });
+    return { id: res.id, request, questions: (res.questions ?? []).map(toQuestion) };
+  }
+
+  async submitPracticeAnswer(
+    sessionId: string,
+    questionId: string,
+    choiceId: string,
+    elapsedMs: number,
+  ): Promise<PracticeAnswerResult> {
+    const res = await this.request<PracticeAnswerResult>(`/practice-sessions/${sessionId}/answers`, {
+      method: 'POST',
+      body: { questionId, selectedChoiceId: choiceId, elapsedMs: Math.round(elapsedMs) },
+      idempotent: true,
+    });
+    return { ...res, reference: specificReference(res.reference) ?? '' };
+  }
+
+  async completePractice(sessionId: string): Promise<{ answeredCount: number; correctCount: number }> {
+    return this.request(`/practice-sessions/${sessionId}/complete`, { method: 'POST', idempotent: true });
+  }
+
+  async createMockExam(): Promise<MockExamSession> {
+    const res = await this.request<{
+      id: string;
+      deadlineAt: string;
+      passCorrectCount: number;
+      questions: BackendQuestion[];
+    }>('/mock-exams', {
+      method: 'POST',
+      body: { packId: PACK_ID, locale: LOCALE, format: 'official_20' },
+      idempotent: true,
+    });
+    return {
+      id: res.id,
+      deadlineAt: res.deadlineAt,
+      passCorrectCount: res.passCorrectCount,
+      // The exam is graded on the server; the client never shows the key
+      // before submission, so it is dropped here rather than trusted to the UI.
+      questions: (res.questions ?? []).map((q) => ({ ...toQuestion(q), correctOptionId: undefined, explanation: undefined })),
+    };
+  }
+
+  async submitMockAnswer(examId: string, questionId: string, choiceId: string, elapsedMs: number): Promise<void> {
+    await this.request(`/mock-exams/${examId}/answers/${encodeURIComponent(questionId)}`, {
+      method: 'PUT',
+      body: { selectedChoiceId: choiceId, elapsedMs: Math.round(elapsedMs) },
+    });
+  }
+
+  async submitMockExam(examId: string): Promise<MockExamResult> {
+    const res = await this.request<MockExamResult>(`/mock-exams/${examId}/submit`, { method: 'POST', idempotent: true });
+    return {
+      ...res,
+      review: (res.review ?? []).map((r) => ({ ...r, reference: specificReference(r.reference) ?? '' })),
+    };
+  }
+
+  async askTutor(request: {
+    message: string;
+    questionId?: string;
+    selectedChoiceId?: string;
+    history: TutorTurn[];
+  }): Promise<TutorAnswer> {
+    const res = await this.request<TutorAnswer>('/ai/tutor', { method: 'POST', body: request });
+    return { ...res, citations: res.citations ?? [] };
   }
 }
 

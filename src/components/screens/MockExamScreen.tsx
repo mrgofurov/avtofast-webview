@@ -1,443 +1,423 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Clock, ShieldAlert, CheckCircle2, XCircle, AlertTriangle, RotateCcw, Trophy, ArrowRight, ArrowLeft, Eye } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { useTelegram } from '@/context/TelegramContext';
+import { ArrowLeft, ArrowRight, Clock, FileCheck, LoaderCircle, RotateCcw, ShieldCheck, Trophy, TriangleAlert, X } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
+import { useTelegram } from '@/context/TelegramContext';
+import { api } from '@/services/api';
+import { categoryMeta } from '@/data/categories';
 import { QuestionMediaViewer } from '@/components/ui/QuestionMediaViewer';
 import { BottomSheet } from '@/components/ui/BottomSheet';
-import { PrimaryButton } from '@/components/ui/PrimaryButton';
-import { SecondaryButton } from '@/components/ui/SecondaryButton';
+import { OptionButton, OptionState, optionLetter } from '@/components/test/OptionButton';
+import { QuestionNavigator, NavCellState } from '@/components/test/QuestionNavigator';
+import { ExplanationCard } from '@/components/test/ExplanationCard';
+import type { MockExamResult, MockExamSession } from '@/types';
+
+type Phase = 'intro' | 'loading' | 'running' | 'submitting' | 'result';
+
+function formatClock(totalSeconds: number) {
+  const s = Math.max(0, totalSeconds);
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
 
 export function MockExamScreen() {
+  const { refresh, setActiveTab } = useApp();
   const { haptic } = useTelegram();
-  const { setActiveTab, questionsPool } = useApp();
 
-  // 20 questions chosen from available questions pool
-  const examQuestions = React.useMemo(() => {
-    const list = [...questionsPool];
-    // if less than 20, duplicate safely, else take 20
-    const selected = [];
-    for (let i = 0; i < 20; i++) {
-      const q = list[i % list.length];
-      selected.push({
-        ...q,
-        id: `exam-q-${i + 1}`,
-        questionNumber: i + 1,
-        totalQuestions: 20,
-      });
-    }
-    return selected;
-  }, [questionsPool]);
+  const [phase, setPhase] = useState<Phase>('intro');
+  const [exam, setExam] = useState<MockExamSession | null>(null);
+  const [result, setResult] = useState<MockExamResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [current, setCurrent] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [confirm, setConfirm] = useState<'submit' | 'exit' | null>(null);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [timeLeftSeconds, setTimeLeftSeconds] = useState(25 * 60); // 25 minutes
-  const [isFinished, setIsFinished] = useState(false);
-  const [showResultsSheet, setShowResultsSheet] = useState(false);
-  const [reviewingIndex, setReviewingIndex] = useState<number | null>(null);
+  const shownAt = useRef(0);
+  const pendingSaves = useRef<Promise<unknown>[]>([]);
+  const submitting = useRef(false);
 
-  // 25-min countdown timer
-  useEffect(() => {
-    if (isFinished) return;
-
-    const timer = setInterval(() => {
-      setTimeLeftSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          finishExam();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isFinished]);
-
-  const currentQ = examQuestions[currentIndex];
-
-  const handleSelectOption = (optId: string) => {
-    if (isFinished) return;
-    haptic('selection');
-    setAnswers((prev) => ({
-      ...prev,
-      [currentIndex]: optId,
-    }));
-  };
-
-  const handleJumpToQuestion = (idx: number) => {
-    haptic('light');
-    setCurrentIndex(idx);
-  };
-
-  const finishExam = () => {
-    setIsFinished(true);
-    setShowResultsSheet(true);
-
-    let correct = 0;
-    examQuestions.forEach((q, idx) => {
-      if (answers[idx] === q.correctOptionId) {
-        correct += 1;
-      }
-    });
-
-    const isPassed = correct >= 18;
-    haptic(isPassed ? 'success' : 'error');
-
-    if (isPassed && typeof window !== 'undefined') {
-      try {
-        confetti({
-          particleCount: 120,
-          spread: 80,
-          origin: { y: 0.6 },
-        });
-      } catch (e) {
-        // ignore
-      }
-    }
-  };
-
-  const restartExam = () => {
+  const start = async () => {
     haptic('medium');
+    setPhase('loading');
+    setError(null);
     setAnswers({});
-    setCurrentIndex(0);
-    setTimeLeftSeconds(25 * 60);
-    setIsFinished(false);
-    setShowResultsSheet(false);
-    setReviewingIndex(null);
-  };
-
-  const formatTimer = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  let correctCount = 0;
-  examQuestions.forEach((q, idx) => {
-    if (answers[idx] === q.correctOptionId) {
-      correctCount += 1;
+    setResult(null);
+    setCurrent(0);
+    submitting.current = false;
+    try {
+      const e = await api.createMockExam();
+      setExam(e);
+      setSecondsLeft(Math.round((new Date(e.deadlineAt).getTime() - Date.now()) / 1000));
+      setPhase('running');
+    } catch (err) {
+      console.warn('exam: create failed', err);
+      setError("Imtihonni boshlab bo'lmadi. Internetni tekshirib, qayta urinib ko'ring.");
+      setPhase('intro');
     }
-  });
-  const passed = correctCount >= 18;
-  const answeredTotal = Object.keys(answers).length;
+  };
 
-  return (
-    <div className="flex flex-col min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] pb-24 md:pb-12">
-      {/* ========================================================
-          EXAM HEADER & 20 TEST NUMBERS NAVIGATOR
-          ======================================================== */}
-      <div className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 safe-top shadow-xs">
-        <div className="w-full max-w-[900px] mx-auto px-4 sm:px-6 py-3">
-          <div className="flex items-center justify-between gap-3 mb-2.5">
-            {/* Left: Back button (<) + Avtofast Logo */}
-            <div className="flex items-center gap-2.5">
-              <button
-                onClick={() => setActiveTab('home')}
-                className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
-                aria-label="Orqaga"
-                title="Bosh sahifaga qaytish"
-              >
-                <ArrowLeft className="w-4.5 h-4.5" />
-              </button>
+  const submit = useCallback(async () => {
+    if (!exam || submitting.current) return;
+    submitting.current = true;
+    setConfirm(null);
+    setPhase('submitting');
+    // Answers are saved as they are picked; the last ones may still be in
+    // flight, and the server grades only what it has.
+    await Promise.allSettled(pendingSaves.current);
+    try {
+      const r = await api.submitMockExam(exam.id);
+      setResult(r);
+      setPhase('result');
+      setCurrent(0);
+      haptic(r.passed ? 'success' : 'error');
+      if (r.passed) {
+        try {
+          confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+        } catch {
+          // decorative only
+        }
+      }
+      refresh();
+    } catch (err) {
+      console.warn('exam: submit failed', err);
+      submitting.current = false;
+      setError("Natijani yuborib bo'lmadi. Qayta urinib ko'ring.");
+      setPhase('running');
+    }
+  }, [exam, haptic, refresh]);
 
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-[#2563EB] flex items-center justify-center text-white font-black text-xs shadow-xs">
-                  A
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-sm font-black tracking-tight text-slate-900 dark:text-white leading-none">
-                    Avtofast
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-400 mt-0.5">
-                    Rasmiy Mock Imtihon
-                  </span>
-                </div>
-              </div>
-            </div>
+  // Countdown against the server's deadline, so a backgrounded tab cannot
+  // drift. At zero the exam is handed in as it stands.
+  useEffect(() => {
+    if (phase !== 'running' || !exam) return;
+    const deadline = new Date(exam.deadlineAt).getTime();
+    const tick = () => {
+      const left = Math.round((deadline - Date.now()) / 1000);
+      setSecondsLeft(left);
+      if (left <= 0) submit();
+    };
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [phase, exam, submit]);
 
-            {/* Right: Timer + Close (X) */}
-            <div className="flex items-center gap-2.5">
-              <div
-                className={`
-                  flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-xs font-bold shadow-xs transition-colors
-                  ${
-                    timeLeftSeconds <= 300
-                      ? 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400 animate-pulse'
-                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                  }
-                `}
-              >
-                <Clock className="w-3.5 h-3.5 text-[#2563EB]" />
-                <span>{formatTimer(timeLeftSeconds)}</span>
-              </div>
+  useEffect(() => {
+    shownAt.current = Date.now();
+  }, [current]);
 
-              <button
-                onClick={() => setActiveTab('home')}
-                className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
-                aria-label="Chiqish"
-                title="Imtihondan chiqish"
-              >
-                <XCircle className="w-4.5 h-4.5" />
-              </button>
-            </div>
-          </div>
+  const questions = useMemo(() => exam?.questions ?? [], [exam]);
+  const total = questions.length;
+  const question = questions[current];
+  const reviewById = useMemo(
+    () => Object.fromEntries((result?.review ?? []).map((r) => [r.questionId, r])),
+    [result],
+  );
 
-          {/* 1 to 20 Test Numbers Grid */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-            {examQuestions.map((q, idx) => {
-              const isAnswered = answers[idx] !== undefined;
-              const isCurrent = currentIndex === idx;
-              const isCorrectInReview = isFinished && answers[idx] === q.correctOptionId;
-              const isWrongInReview = isFinished && isAnswered && answers[idx] !== q.correctOptionId;
+  const choose = useCallback(
+    (choiceId: string) => {
+      if (phase !== 'running' || !exam || !question) return;
+      haptic('selection');
+      setAnswers((prev) => ({ ...prev, [question.id]: choiceId }));
+      const save = api
+        .submitMockAnswer(exam.id, question.id, choiceId, Date.now() - shownAt.current)
+        .catch((err) => console.warn('exam: answer not saved', err));
+      pendingSaves.current.push(save);
+    },
+    [phase, exam, question, haptic],
+  );
 
-              return (
-                <button
-                  key={idx}
-                  onClick={() => handleJumpToQuestion(idx)}
-                  className={`
-                    w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold shrink-0 transition-all cursor-pointer flex items-center justify-center select-none
-                    ${
-                      isCurrent
-                        ? 'bg-[#2563EB] text-white shadow-md shadow-blue-500/30 scale-105 ring-2 ring-blue-400/40'
-                        : isFinished
-                        ? isCorrectInReview
-                          ? 'bg-emerald-500 text-white'
-                          : isWrongInReview
-                          ? 'bg-red-500 text-white'
-                          : 'bg-slate-200 dark:bg-slate-700 text-slate-400'
-                        : isAnswered
-                        ? 'bg-blue-100 dark:bg-blue-900/60 text-[#2563EB] dark:text-blue-300 font-bold'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                    }
-                  `}
-                  title={`Savol ${idx + 1}`}
-                >
-                  {idx + 1}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+  const goTo = (i: number) => {
+    if (i < 0 || i >= total) return;
+    haptic('light');
+    setCurrent(i);
+  };
 
-      {/* ========================================================
-          CENTER CONTENT AREA (Desktop 900px)
-          ======================================================== */}
-      <div className="flex-1 w-full max-w-[800px] mx-auto px-4 sm:px-6 py-5 flex flex-col items-center gap-5">
-        {/* Real Video / Image Media Display */}
-        <QuestionMediaViewer
-          imageUrl={currentQ?.imageUrl}
-          videoUrl={currentQ?.videoUrl}
-          signSymbol={currentQ?.signSymbol}
-          signType={currentQ?.signType}
-          topicTitle={currentQ?.topicTitle}
-        />
-
-        {/* Question Statement */}
-        <div className="w-full text-center sm:text-left bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
-            Savol #{currentIndex + 1}
-          </span>
-          <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed">
-            {currentQ?.text}
-          </h3>
+  if (phase === 'intro' || phase === 'loading') {
+    return (
+      <div className="w-full max-w-2xl mx-auto flex flex-col gap-5 pb-28 md:pb-12 pt-4 sm:pt-6 px-4 sm:px-6">
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">Imtihon</h2>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
+            Haqiqiy nazariy imtihon sharoitida o&apos;zingizni sinab ko&apos;ring.
+          </p>
         </div>
 
-        {/* 4 Large Answer Options */}
-        <div className="w-full flex flex-col gap-2.5">
-          {currentQ?.options.map((opt, idx) => {
-            const isSelected = answers[currentIndex] === opt.id;
-            const letter = ['A', 'B', 'C', 'D'][idx] || `${idx + 1}`;
-            const isCorrectAnswer = isFinished && currentQ.correctOptionId === opt.id;
-            const isWrongSelected = isFinished && isSelected && !isCorrectAnswer;
-
-            return (
-              <button
-                key={opt.id}
-                disabled={isFinished}
-                onClick={() => handleSelectOption(opt.id)}
-                className={`
-                  w-full min-h-[58px] p-4 rounded-2xl text-left transition-all duration-150
-                  flex items-center gap-3.5 cursor-pointer active:scale-[0.99] select-none
-                  ${
-                    isFinished
-                      ? isCorrectAnswer
-                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-500 text-emerald-900 dark:text-emerald-100 font-bold'
-                        : isWrongSelected
-                        ? 'bg-red-50 dark:bg-red-950/60 border-2 border-red-500 text-red-900 dark:text-red-100'
-                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 opacity-60'
-                      : isSelected
-                      ? 'bg-blue-50/90 dark:bg-blue-950/50 border-2 border-[#2563EB] shadow-md shadow-blue-500/10'
-                      : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                  }
-                `}
-              >
-                <div
-                  className={`
-                    w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs sm:text-sm font-black transition-colors
-                    ${
-                      isFinished
-                        ? isCorrectAnswer
-                          ? 'bg-emerald-600 text-white'
-                          : isWrongSelected
-                          ? 'bg-red-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-                        : isSelected
-                        ? 'bg-[#2563EB] text-white shadow-xs'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }
-                  `}
-                >
-                  {isFinished && isCorrectAnswer ? (
-                    <CheckCircle2 className="w-5 h-5" />
-                  ) : isFinished && isWrongSelected ? (
-                    <XCircle className="w-5 h-5" />
-                  ) : (
-                    letter
-                  )}
-                </div>
-
-                <span
-                  className={`text-sm sm:text-base leading-snug flex-1 ${
-                    isSelected
-                      ? 'font-bold text-[#2563EB] dark:text-blue-300'
-                      : 'font-medium text-slate-800 dark:text-slate-200'
-                  }`}
-                >
-                  {opt.text}
-                </span>
-              </button>
-            );
-          })}
+        <div className="rounded-[28px] bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] p-6 text-white shadow-xl shadow-blue-500/15 flex flex-col gap-5">
+          <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center">
+            <FileCheck className="w-6 h-6" />
+          </div>
+          <ul className="flex flex-col gap-2.5 text-sm font-medium text-blue-50">
+            <li className="flex gap-2.5"><ShieldCheck className="w-5 h-5 shrink-0 text-blue-200" />20 ta savol barcha mavzulardan tasodifiy tanlanadi</li>
+            <li className="flex gap-2.5"><Clock className="w-5 h-5 shrink-0 text-blue-200" />Vaqt cheklangan — tugaganda imtihon avtomatik topshiriladi</li>
+            <li className="flex gap-2.5"><TriangleAlert className="w-5 h-5 shrink-0 text-blue-200" />To&apos;g&apos;ri javoblar faqat topshirgandan keyin ko&apos;rsatiladi</li>
+          </ul>
+          <button
+            type="button"
+            onClick={start}
+            disabled={phase === 'loading'}
+            className="h-14 rounded-2xl bg-white text-[#2563EB] font-bold text-base flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
+          >
+            {phase === 'loading' ? <LoaderCircle className="w-5 h-5 animate-spin" /> : null}
+            Imtihonni boshlash
+          </button>
         </div>
 
-        {/* Explanation banner if finished */}
-        {isFinished && currentQ?.explanation && (
-          <div className="w-full bg-blue-50 dark:bg-blue-950/40 p-4 rounded-2xl border border-blue-200 dark:border-blue-800/60 flex flex-col gap-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">
-              <ShieldAlert className="w-4 h-4" />
-              <span>YHQ Qoidasi: {currentQ.explanation.ruleArticle}</span>
-            </div>
-            <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-              {currentQ.explanation.officialRule}
-            </p>
-          </div>
+        {error && (
+          <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">{error}</p>
         )}
       </div>
+    );
+  }
 
-      {/* ========================================================
-          STICKY BOTTOM ACTIONS
-          ======================================================== */}
-      <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 p-4 safe-bottom">
-        <div className="w-full max-w-[800px] mx-auto flex items-center justify-between gap-3">
-          <SecondaryButton
-            disabled={currentIndex === 0}
-            onClick={() => handleJumpToQuestion(currentIndex - 1)}
-            icon={<ArrowLeft className="w-4 h-4" />}
-            className="w-28 sm:w-36"
-          >
-            Oldingi
-          </SecondaryButton>
+  const isResult = phase === 'result' && result;
+  const review = question ? reviewById[question.id] : undefined;
+  const answeredCount = Object.keys(answers).length;
 
-          {isFinished ? (
-            <PrimaryButton
-              onClick={() => setShowResultsSheet(true)}
-              icon={<Trophy className="w-5 h-5" />}
-              className="flex-1"
+  const navStates: NavCellState[] = questions.map((q) => {
+    if (isResult) {
+      const r = reviewById[q.id];
+      if (!r || !r.selectedChoiceId) return 'empty';
+      return r.isCorrect ? 'correct' : 'wrong';
+    }
+    return answers[q.id] ? 'answered' : 'empty';
+  });
+
+  const optionState = (optionId: string): OptionState => {
+    if (isResult && review) {
+      if (optionId === review.correctChoiceId) return 'correct';
+      if (optionId === review.selectedChoiceId) return 'wrong';
+      return 'dimmed';
+    }
+    return answers[question?.id ?? ''] === optionId ? 'selected' : 'idle';
+  };
+
+  const lowTime = phase === 'running' && secondsLeft <= 300;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#F8FAFC] dark:bg-[#0B0F19] flex flex-col">
+      <header className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 safe-top">
+        <div className="w-full max-w-2xl mx-auto px-4 pb-2">
+          <div className="flex items-center gap-3 h-12">
+            <button
+              type="button"
+              onClick={() => (isResult ? setPhase('intro') : setConfirm('exit'))}
+              aria-label="Chiqish"
+              className="w-10 h-10 -ml-1 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
-              Natijalarni ko'rish
-            </PrimaryButton>
-          ) : currentIndex === 19 ? (
-            <PrimaryButton
-              onClick={finishExam}
-              icon={<CheckCircle2 className="w-5 h-5" />}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-            >
-              Imtihonni topshirish
-            </PrimaryButton>
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-black text-slate-900 dark:text-white">
+                {isResult ? 'Imtihon natijasi' : 'Imtihon'}
+              </div>
+              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                Savol {current + 1} / {total}
+                {question ? ` · ${categoryMeta(question.category).title}` : ''}
+              </div>
+            </div>
+            {isResult ? (
+              <span
+                className={`px-3 py-1.5 rounded-full text-xs font-black ${
+                  result.passed
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                    : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                }`}
+              >
+                {result.correctCount}/{result.questionCount}
+              </span>
+            ) : (
+              <span
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-sm font-bold ${
+                  lowTime ? 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-300' : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100'
+                }`}
+              >
+                <Clock className="w-4 h-4" />
+                {formatClock(secondsLeft)}
+              </span>
+            )}
+          </div>
+          <QuestionNavigator states={navStates} current={current} onJump={goTo} />
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto overscroll-contain">
+        <div className="w-full max-w-2xl mx-auto px-4 py-4 flex flex-col gap-4">
+          {phase === 'submitting' ? (
+            <div className="mt-16 flex flex-col items-center gap-3 text-slate-500">
+              <LoaderCircle className="w-7 h-7 animate-spin text-[#2563EB]" />
+              <span className="text-sm font-semibold">Javoblar tekshirilmoqda…</span>
+            </div>
           ) : (
-            <PrimaryButton
-              onClick={() => handleJumpToQuestion(currentIndex + 1)}
-              icon={<ArrowRight className="w-5 h-5" />}
-              className="flex-1"
-            >
-              Keyingisi
-            </PrimaryButton>
+            question && (
+              <>
+                {isResult && current === 0 && <ResultBanner result={result} onRetry={start} />}
+
+                <QuestionMediaViewer imageUrl={question.imageUrl} videoUrl={question.videoUrl} revealVideo={Boolean(isResult)} />
+                <h2 className="text-[17px] sm:text-lg font-bold leading-relaxed text-slate-900 dark:text-white whitespace-pre-line">
+                  {question.text}
+                </h2>
+                <div className="flex flex-col gap-2.5">
+                  {question.options.map((opt, idx) => (
+                    <OptionButton
+                      key={opt.id}
+                      index={idx}
+                      text={opt.text}
+                      state={optionState(opt.id)}
+                      disabled={phase !== 'running'}
+                      onClick={() => choose(opt.id)}
+                    />
+                  ))}
+                </div>
+
+                {isResult && review && (
+                  <ExplanationCard
+                    isCorrect={review.isCorrect}
+                    correctLetter={(() => {
+                      const i = question.options.findIndex((o) => o.id === review.correctChoiceId);
+                      return i >= 0 ? optionLetter(i) : undefined;
+                    })()}
+                    correctText={question.options.find((o) => o.id === review.correctChoiceId)?.text}
+                    explanation={review.explanation}
+                    reference={review.reference}
+                  />
+                )}
+
+                {error && phase === 'running' && (
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">{error}</p>
+                )}
+              </>
+            )
           )}
         </div>
       </div>
 
-      {/* ========================================================
-          BOTTOM SHEET RESULTS MODAL
-          ======================================================== */}
-      <BottomSheet isOpen={showResultsSheet} onClose={() => setShowResultsSheet(false)} title="Imtihon Natijalari">
-        <div className="flex flex-col items-center gap-5 text-center">
-          {/* Badge */}
-          <div
-            className={`
-              w-20 h-20 rounded-full flex items-center justify-center shadow-lg
-              ${
-                passed
-                  ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 shadow-emerald-500/20'
-                  : 'bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-400 shadow-red-500/20'
-              }
-            `}
+      {phase !== 'submitting' && (
+        <footer className="shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 safe-bottom">
+          <div className="w-full max-w-2xl mx-auto px-4 pt-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => goTo(current - 1)}
+              disabled={current === 0}
+              aria-label="Oldingi savol"
+              className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-default"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            {!isResult && current === total - 1 ? (
+              <button
+                type="button"
+                onClick={() => (answeredCount < total ? setConfirm('submit') : submit())}
+                className="flex-1 h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <FileCheck className="w-5 h-5" />
+                Imtihonni topshirish
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => (current < total - 1 ? goTo(current + 1) : setActiveTab('home'))}
+                className="flex-1 h-14 rounded-2xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {current < total - 1 ? 'Keyingi savol' : 'Bosh sahifaga'}
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            )}
+            {!isResult && current < total - 1 && (
+              <button
+                type="button"
+                onClick={() => setConfirm('submit')}
+                className="h-14 px-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-sm font-bold cursor-pointer"
+              >
+                Topshirish
+              </button>
+            )}
+          </div>
+        </footer>
+      )}
+
+      <BottomSheet
+        isOpen={confirm !== null}
+        onClose={() => setConfirm(null)}
+        title={confirm === 'exit' ? 'Imtihondan chiqasizmi?' : 'Imtihonni topshirasizmi?'}
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-5">
+          {confirm === 'exit'
+            ? "Chiqsangiz, bu urinish natijasiz qoladi."
+            : answeredCount < total
+              ? `${total - answeredCount} ta savolga javob berilmagan — ular xato hisoblanadi.`
+              : 'Barcha savollarga javob berdingiz.'}
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => setConfirm(null)}
+            className="flex-1 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
           >
-            {passed ? <Trophy className="w-10 h-10" /> : <AlertTriangle className="w-10 h-10" />}
-          </div>
-
-          <div>
-            <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
-              {passed ? "Tabriklaymiz! Imtihondan o'tdingiz 🎉" : "Afsuski, yetarli ball to'play olmadingiz"}
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-              {passed
-                ? "Siz rasmiy DYHXX talablariga muvofiq haydovchilik nazariy imtihonidan muvaffaqiyatli o'tdingiz!"
-                : "Rasmiy imtihondan o'tish uchun kamida 18 ta savolga to'g'ri javob berish shart (maksimal 2 ta xato)."}
-            </p>
-          </div>
-
-          {/* Stats Bar */}
-          <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80">
-              <span className="text-[11px] font-bold text-slate-400 block">To'g'ri</span>
-              <span className="text-lg font-black text-emerald-600 dark:text-emerald-400">{correctCount}</span>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80">
-              <span className="text-[11px] font-bold text-slate-400 block">Xato</span>
-              <span className="text-lg font-black text-red-600 dark:text-red-400">{20 - correctCount}</span>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80">
-              <span className="text-[11px] font-bold text-slate-400 block">Natija</span>
-              <span className="text-lg font-black text-[#2563EB]">
-                {Math.round((correctCount / 20) * 100)}%
-              </span>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm pt-2">
-            <SecondaryButton
-              onClick={() => setShowResultsSheet(false)}
-              icon={<Eye className="w-4 h-4" />}
-              className="flex-1"
-            >
-              Xatolarni ko'rish
-            </SecondaryButton>
-
-            <PrimaryButton
-              onClick={restartExam}
-              icon={<RotateCcw className="w-4 h-4" />}
-              className="flex-1"
-            >
-              Qayta topshirish
-            </PrimaryButton>
-          </div>
+            Davom etish
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm === 'exit') {
+                setConfirm(null);
+                setPhase('intro');
+                setExam(null);
+              } else {
+                submit();
+              }
+            }}
+            className={`flex-1 h-12 rounded-xl text-sm font-bold text-white cursor-pointer ${
+              confirm === 'exit' ? 'bg-red-600' : 'bg-emerald-600'
+            }`}
+          >
+            {confirm === 'exit' ? 'Chiqish' : 'Topshirish'}
+          </button>
         </div>
       </BottomSheet>
+    </div>
+  );
+}
+
+function ResultBanner({ result, onRetry }: { result: MockExamResult; onRetry: () => void }) {
+  const wrong = result.review.filter((r) => !r.isCorrect).length;
+  return (
+    <div
+      className={`rounded-[24px] p-5 flex flex-col gap-3 border ${
+        result.passed
+          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900'
+          : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+            result.passed ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
+          }`}
+        >
+          {result.passed ? <Trophy className="w-6 h-6" /> : <TriangleAlert className="w-6 h-6" />}
+        </div>
+        <div>
+          <div className="text-lg font-black text-slate-900 dark:text-white">
+            {result.passed ? "Imtihondan o'tdingiz!" : "Imtihondan o'ta olmadingiz"}
+          </div>
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            {result.correctCount} ta to&apos;g&apos;ri, {wrong} ta xato · o&apos;tish uchun kamida {result.passCorrectCount} ta
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Har bir savolni raqamlar orqali ochib, to&apos;g&apos;ri javob va rasmiy izohni ko&apos;ring.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="h-11 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center justify-center gap-2 cursor-pointer"
+      >
+        <RotateCcw className="w-4 h-4" />
+        Yangi imtihon
+      </button>
     </div>
   );
 }

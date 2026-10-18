@@ -2,14 +2,10 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Bell, Flame, Sparkles, Moon, Sun, Search, Home, BookOpen, Bot, FileCheck, User } from 'lucide-react';
+import { Flame, Moon, Sun, Home, BookOpen, Bot, FileCheck, User } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useTelegram } from '@/context/TelegramContext';
 import { TabType } from '@/types';
-
-interface HeaderProps {
-  showGreeting?: boolean;
-}
 
 const navLinks: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'home', label: 'Bosh sahifa', icon: Home },
@@ -19,9 +15,10 @@ const navLinks: { id: TabType; label: string; icon: React.ComponentType<{ classN
   { id: 'profile', label: 'Profil', icon: User },
 ];
 
-export function Header({ showGreeting = true }: HeaderProps) {
-  const { activeTab, setActiveTab, userStats, isDarkMode, toggleDarkMode, showToast } = useApp();
-  const { user, haptic } = useTelegram();
+export function Header() {
+  const { activeTab, setActiveTab, dashboard, isDarkMode, toggleDarkMode, showToast } = useApp();
+  const { user } = useTelegram();
+  const streak = dashboard?.streakDays ?? 0;
 
   return (
     <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#0B0F19]/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
@@ -89,13 +86,15 @@ export function Header({ showGreeting = true }: HeaderProps) {
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Streak Badge */}
             <div
-              onClick={() => showToast(`O'rganish seriyasi: ${userStats.currentStreakDays} kun ketma-ket!`)}
+              onClick={() =>
+                showToast(streak > 0 ? `${streak} kun ketma-ket shug'ullanyapsiz!` : "Bugun bitta test ishlab, seriyani boshlang!")
+              }
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-50 dark:bg-orange-950/40 border border-orange-200/80 dark:border-orange-800/60 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
               title="Ketma-ket kunlar"
             >
               <Flame className="w-4 h-4 text-orange-500 fill-orange-500" />
               <span className="text-xs font-bold text-orange-600 dark:text-orange-400">
-                {userStats.currentStreakDays} kun
+                {streak} kun
               </span>
             </div>
 
@@ -113,26 +112,13 @@ export function Header({ showGreeting = true }: HeaderProps) {
               )}
             </button>
 
-            {/* Notification Bell */}
-            <button
-              onClick={() => {
-                haptic('light');
-                showToast("Bugun 15 daqiqalik AI darsi: Chorrahalar bo'yicha tavsiya!");
-              }}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 active:scale-95 transition-all cursor-pointer relative"
-              aria-label="Bildirishnomalar"
-            >
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-slate-900" />
-            </button>
-
             {/* User Avatar */}
             <div
               onClick={() => setActiveTab('profile')}
               className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-sm flex items-center justify-center cursor-pointer shadow-sm hover:ring-2 hover:ring-blue-500/30 active:scale-95 transition-all"
               title="Profil"
             >
-              {user?.first_name ? user.first_name[0].toUpperCase() : 'M'}
+              {user?.first_name ? user.first_name[0].toUpperCase() : <User className="w-4 h-4" />}
             </div>
           </div>
         </div>
