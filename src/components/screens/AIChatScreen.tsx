@@ -24,7 +24,7 @@ const CONTEXT_QUESTIONS = [
 ];
 
 const GREETING =
-  "Assalomu alaykum! Men Avtofast AI Ustoziman. Yo'l harakati qoidalari bo'yicha savol bering — faqat Yo'l harakati qoidalarining rasmiy matni va imtihon savollarining rasmiy izohlariga tayanib javob beraman hamda qaysi bandga asoslanganimni ko'rsataman.";
+  "Assalomu alaykum! Men Avtofast AI Ustoziman. Yo'l harakati qoidalari bo'yicha savol bering — faqat Yo'l harakati qoidalari, Yo'l harakati to'g'risidagi qonun va Ma'muriy javobgarlik kodeksining rasmiy matni hamda imtihon savollarining rasmiy izohlariga tayanib javob beraman hamda qaysi bandga asoslanganimni ko'rsataman.";
 
 const CONTEXT_GREETING =
   "Bu savolda xato qildingiz. Nimasi tushunarsiz bo'lsa, so'rang — qoidalar matni va savolning rasmiy izohiga tayanib tushuntiraman.";
@@ -59,7 +59,7 @@ function Citations({ citations }: { citations: TutorCitation[] }) {
               <span className="flex-1 min-w-0">
                 {c.clause || 'Savollar bazasi izohi'}
                 <span className="block text-[10px] font-semibold text-slate-400">
-                  {c.kind === 'rule' ? "Yo'l harakati qoidalari matni" : 'Imtihon savoli izohi'}
+                  {c.kind === 'rule' ? 'Rasmiy hujjat matni (lex.uz)' : 'Imtihon savoli izohi'}
                 </span>
               </span>
               <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />

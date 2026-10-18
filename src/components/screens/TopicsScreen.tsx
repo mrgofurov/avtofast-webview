@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronRight, LoaderCircle, Search, Shuffle, Target } from 'lucide-react';
+import { ArrowLeft, BookOpenText, ChevronRight, LoaderCircle, Search, Shuffle, Target } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/services/api';
-import { categoryMeta } from '@/data/categories';
+import { categoryMeta, TOPIC_GROUPS } from '@/data/categories';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import type { TopicSummary, TopicTest } from '@/types';
 
@@ -18,12 +18,25 @@ export function TopicsScreen() {
     return <TopicDetail topic={open} onBack={() => setOpenCategory(null)} reloadKey={practiceRequest} />;
   }
 
+  const q = query.trim().toLowerCase();
   const visible = (topics ?? []).filter((t) => {
+    if (!q) return true;
     const meta = categoryMeta(t.category);
-    const q = query.trim().toLowerCase();
-    return !q || meta.title.toLowerCase().includes(q) || meta.description.toLowerCase().includes(q);
+    return [t.title || meta.title, t.groupTitle, t.source ?? meta.description].some((s) => s?.toLowerCase().includes(q));
   });
+  // Topics arrive in syllabus order; grouping keeps that order within each
+  // heading, and headings follow the order of their first topic.
+  const groups: { key: string; title: string; topics: TopicSummary[] }[] = [];
+  for (const t of visible) {
+    let g = groups.find((x) => x.key === t.group);
+    if (!g) {
+      g = { key: t.group, title: t.groupTitle || TOPIC_GROUPS[t.group]?.title || t.group, topics: [] };
+      groups.push(g);
+    }
+    g.topics.push(t);
+  }
   const totalQuestions = (topics ?? []).reduce((sum, t) => sum + t.questionCount, 0);
+  const topicCount = (topics ?? []).length;
 
   return (
     <div className="w-full max-w-5xl mx-auto flex flex-col gap-5 pb-28 md:pb-12 pt-4 sm:pt-6 px-4 sm:px-6 lg:px-8">
@@ -32,7 +45,7 @@ export function TopicsScreen() {
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">Mavzular</h2>
           <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
             {topics
-              ? `${totalQuestions} ta savol mavzularga bo'lingan. Har bir test — 20 ta savol, xuddi imtihondagidek.`
+              ? `${totalQuestions} ta savol Yo'l harakati qoidalari bo'yicha ${topicCount} ta mavzuga bo'lingan. Har bir test — 20 ta savol.`
               : 'Mavzular yuklanmoqda…'}
           </p>
         </div>
@@ -58,62 +71,77 @@ export function TopicsScreen() {
       )}
 
       {!topics && !loadError && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="flex flex-col gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-36 rounded-[24px] bg-slate-200/60 dark:bg-slate-800/60 animate-pulse" />
+            <div key={i} className="h-16 rounded-2xl bg-slate-200/60 dark:bg-slate-800/60 animate-pulse" />
           ))}
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visible.map((topic) => (
-          <TopicCard key={topic.category} topic={topic} onOpen={() => setOpenCategory(topic.category)} />
-        ))}
-      </div>
+      {topics && groups.length === 0 && (
+        <p className="text-sm text-slate-500 dark:text-slate-400">&ldquo;{query}&rdquo; bo&apos;yicha mavzu topilmadi.</p>
+      )}
+
+      {groups.map((group) => {
+        const meta = TOPIC_GROUPS[group.key];
+        const Icon = meta?.icon ?? BookOpenText;
+        const color = meta?.color ?? '#64748B';
+        const questions = group.topics.reduce((s, t) => s + t.questionCount, 0);
+        return (
+          <section key={group.key} className="flex flex-col gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${color}1A`, color }}
+              >
+                <Icon className="w-4.5 h-4.5" />
+              </div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">{group.title}</h3>
+              <span className="text-xs font-semibold text-slate-400">
+                {group.topics.length} mavzu · {questions} savol
+              </span>
+            </div>
+            <div className="bg-white dark:bg-slate-800/90 rounded-[20px] border border-slate-200/80 dark:border-slate-700/80 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
+              {group.topics.map((topic) => (
+                <TopicRow key={topic.category} topic={topic} color={color} onOpen={() => setOpenCategory(topic.category)} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
 
-function TopicCard({ topic, onOpen }: { topic: TopicSummary; onOpen: () => void }) {
+function TopicRow({ topic, color, onOpen }: { topic: TopicSummary; color: string; onOpen: () => void }) {
   const meta = categoryMeta(topic.category);
-  const Icon = meta.icon;
   const coverage = topic.testCount > 0 ? Math.round((topic.completedTests / topic.testCount) * 100) : 0;
   const empty = topic.questionCount === 0;
+  const source = topic.source ?? meta.description;
 
   return (
     <button
       type="button"
       onClick={onOpen}
       disabled={empty}
-      className="text-left bg-white dark:bg-slate-800/90 rounded-[24px] p-5 border border-slate-200/80 dark:border-slate-700/80 shadow-sm flex flex-col gap-4 enabled:hover:border-blue-400 enabled:active:scale-[0.99] transition-all enabled:cursor-pointer disabled:opacity-60"
+      className="w-full flex items-center gap-3 px-4 py-3 text-left enabled:hover:bg-slate-50 dark:enabled:hover:bg-slate-700/30 enabled:cursor-pointer disabled:opacity-55 transition-colors"
     >
-      <div className="flex items-start gap-3.5">
-        <div
-          className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
-          style={{ backgroundColor: `${meta.color}1A`, color: meta.color }}
-        >
-          <Icon className="w-6 h-6" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-bold text-slate-900 dark:text-white leading-snug">{topic.title || meta.title}</div>
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+          {source && <span>{source}</span>}
+          <span>
+            {empty ? "savollar tez orada qo'shiladi" : `${topic.questionCount} savol · ${topic.completedTests}/${topic.testCount} test`}
+          </span>
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">{meta.title}</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium line-clamp-2 mt-0.5">{meta.description}</p>
-        </div>
-        <ProgressRing progress={coverage} size={46} strokeWidth={4.5} color={meta.color} />
       </div>
-
-      <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700/60 text-xs font-semibold text-slate-500 dark:text-slate-400">
-        <span>
-          {empty ? "Savollar tez orada qo'shiladi" : `${topic.questionCount} savol · ${topic.completedTests}/${topic.testCount} test`}
+      {topic.dueMistakes > 0 && (
+        <span className="px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-300 text-xs font-bold shrink-0">
+          {topic.dueMistakes} xato
         </span>
-        <span className="flex items-center gap-2">
-          {topic.dueMistakes > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-300 font-bold">
-              {topic.dueMistakes} xato
-            </span>
-          )}
-          {!empty && <ChevronRight className="w-4 h-4 text-[#2563EB]" />}
-        </span>
-      </div>
+      )}
+      {!empty && <ProgressRing progress={coverage} size={36} strokeWidth={4} color={color} />}
+      {!empty && <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
     </button>
   );
 }
@@ -162,8 +190,10 @@ function TopicDetail({ topic, onBack, reloadKey }: { topic: TopicSummary; onBack
           <Icon className="w-7 h-7" />
         </div>
         <div className="flex-1">
-          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">{meta.title}</h2>
+          <div className="text-xs font-bold uppercase tracking-wide text-slate-400">{topic.groupTitle || meta.group}</div>
+          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">{topic.title || meta.title}</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {(topic.source ?? meta.description) ? `${topic.source ?? meta.description} · ` : ''}
             {topic.questionCount} savol · {topic.testCount} test
             {topic.accuracyPercent > 0 ? ` · ${topic.accuracyPercent}% aniqlik` : ''}
           </p>

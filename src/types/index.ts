@@ -30,9 +30,16 @@ export interface Question {
   reference?: string;
 }
 
-// One row of the topics list (GET /topics).
+// One row of the topics list (GET /topics). A topic is a chapter of the
+// Yo'l harakati qoidalari or a section of one of its appendices; category is
+// its key.
 export interface TopicSummary {
   category: string;
+  title: string;
+  group: string;
+  groupTitle: string;
+  // What the topic covers in the Rules, e.g. "YHQ 16-bob, 104-band".
+  source?: string;
   questionCount: number;
   testCount: number;
   completedTests: number;
@@ -123,7 +130,8 @@ export interface MockExamResult {
 // the model wrote — so the clause shown is one the bank really cites.
 export interface TutorCitation {
   id: string;
-  // "rule": a clause of the Yo'l harakati qoidalari itself (lex.uz text).
+  // "rule": official legal text from lex.uz — the Yo'l harakati qoidalari,
+  // the Yo'l harakati to'g'risidagi qonun or the traffic articles of MJtK.
   // "question": a bank question's official explanation.
   kind: 'rule' | 'question';
   questionId?: string;

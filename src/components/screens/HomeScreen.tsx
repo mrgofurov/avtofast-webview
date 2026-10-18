@@ -70,6 +70,11 @@ export function HomeScreen() {
   const next = pickNextStep(dashboard, topics);
 
   const studied = (topics ?? []).filter((t) => t.questionCount > 0);
+  // The syllabus has dozens of topics; home shows a handful, those already
+  // under way first, and "Barchasi" leads to the rest.
+  const homeTopics = [...studied]
+    .sort((a, b) => Number(b.completedTests > 0) - Number(a.completedTests > 0))
+    .slice(0, 5);
   const totalTests = studied.reduce((s, t) => s + t.testCount, 0);
   const doneTests = studied.reduce((s, t) => s + t.completedTests, 0);
   const coverage = totalTests > 0 ? Math.round((doneTests / totalTests) * 100) : 0;
@@ -191,7 +196,7 @@ export function HomeScreen() {
             </button>
           </div>
           <div className="bg-white dark:bg-slate-800/90 rounded-[24px] border border-slate-200/80 dark:border-slate-700/80 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
-            {studied.map((t) => {
+            {homeTopics.map((t) => {
               const meta = categoryMeta(t.category);
               const Icon = meta.icon;
               const pct = t.testCount > 0 ? Math.round((t.completedTests / t.testCount) * 100) : 0;
